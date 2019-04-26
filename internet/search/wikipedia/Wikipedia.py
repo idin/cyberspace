@@ -25,14 +25,21 @@ class Wikipedia:
 	def api_url(self):
 		return 'http://' + self.language + '.wikipedia.org/w/api.php'
 
-	def request(self, params):
+	def request(self, parameters=None, url=None, format='json'):
 		"""
-		:type params: dict
+		:type parameters: dict
 		:rtype: dict
 		"""
-		params['format'] = 'json'
-		if 'action' not in params:
-			params['action'] = 'query'
+		if format == 'json':
+			if parameters is None:
+				raise ValueError('parameters cannot be empty for json request!')
+			parameters['format'] = 'json'
+			if 'action' not in parameters:
+				parameters['action'] = 'query'
+		else:
+			if url is None:
+				raise ValueError('url cannot be empty for non-json request!')
+
 
 		headers = {'User-Agent': self._user_agent}
 
@@ -41,11 +48,18 @@ class Wikipedia:
 			if  wait_time > 0:
 				time.sleep(wait_time)
 
-		r = requests.get(self.api_url, params=params, headers=headers)
+
+		if format == 'json':
+			r = requests.get(self.api_url, params=parameters, headers=headers)
+			result = r.json()
+		else:
+			result = requests.get(url, headers=headers)
+			# result = html.document_fromstring(r.text)
+			# result = r.text
+
 		if self._rate_limit_wait:
 			self._rate_limit_last_call = get_now()
-
-		return r.json()
+		return result
 
 	def search(self, query, num_results=10, redirect=True):
 		"""

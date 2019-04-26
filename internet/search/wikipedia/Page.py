@@ -1,5 +1,7 @@
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, SoupStrainer
 from pensieve import Pensieve
+import re
+import datefinder
 
 from .exceptions import PageError, RedirectError, DisambiguationError, ODD_ERROR_MESSAGE
 
@@ -13,11 +15,11 @@ class Page:
 		else:
 			raise ValueError('Either id or title should be given!')
 
-		self.pensieve.store('original_id', content=id)
-		self.pensieve.store('original_title', content=title)
-		self.pensieve.store('namespace', content=namespace)
-		self.pensieve.store('redirect', content=redirect)
-		self.pensieve.store('redirected_from', content=redirected_from)
+		self._pensieve.store('original_id', content=id)
+		self._pensieve.store('original_title', content=title)
+		self._pensieve.store('namespace', content=namespace)
+		self._pensieve.store('redirect', content=redirect)
+		self._pensieve.store('redirected_from', content=redirected_from)
 		self._loaded = False
 
 	@property
@@ -25,13 +27,20 @@ class Page:
 		"""
 		:rtype: Pensieve
 		"""
+		if not self._loaded:
+			self.load()
 		return self._pensieve
+
+	@property
+	def base_url(self):
+		return 'http://' + self.api.language + '.wikipedia.org'
 
 	def clear(self):
 		new_pensieve = Pensieve(safe=True)
 		for key in ['original_id', 'original_title', 'namespace', 'redirect', 'redirected_from']:
 			new_pensieve.store(key=key, content=self.pensieve[key])
 		self._pensieve = new_pensieve
+		self._loaded = False
 
 	@staticmethod
 	def _get_state_attributes():
@@ -47,17 +56,17 @@ class Page:
 
 	@property
 	def title(self):
-		if 'title' in self.pensieve:
-			return self.pensieve['title']
+		if 'title' in self._pensieve:
+			return self._pensieve['title']
 		else:
-			return self.pensieve['original_title']
+			return self._pensieve['original_title']
 
 	@property
 	def id(self):
-		if 'id' in self.pensieve:
-			return self.pensieve['id']
+		if 'id' in self._pensieve:
+			return self._pensieve['id']
 		else:
-			return self.pensieve['original_id']
+			return self._pensieve['original_id']
 
 	def __str__(self):
 		return f'Wikipedia Page: {self.title} (id:{self.id})'
@@ -77,10 +86,16 @@ class Page:
 
 	@api.setter
 	def api(self, api):
+		"""
+		:type api: .Wikipedia.Wikipedia
+		"""
 		self._api = api
 
+	def request(self, url=None, parameters=None, format='html'):
+		return self.api.request(url=url, parameters=parameters, format=format)
+
 	@staticmethod
-	def get_search_parameters(id, title):
+	def _get_search_parameters(id, title):
 		query_parameters = {
 			'prop': 'info|pageprops',
 			'inprop': 'url',
@@ -96,7 +111,7 @@ class Page:
 		return query_parameters
 
 	@staticmethod
-	def get_html_parameters(id, title):
+	def _get_html_parameters(id, title):
 		query_params = {
 			'prop': 'revisions',
 			'rvprop': 'content',
@@ -110,7 +125,7 @@ class Page:
 		return query_params
 
 	@staticmethod
-	def get_summary_parameters(id, title):
+	def _get_summary_parameters(id, title):
 		query_params = {
 			'prop': 'extracts',
 			'explaintext': '',
@@ -123,7 +138,7 @@ class Page:
 		return query_params
 
 	@staticmethod
-	def get_content_parameters(id, title):
+	def _get_content_parameters(id, title):
 		query_params = {
 			'prop': 'extracts|revisions',
 			'explaintext': '',
@@ -136,13 +151,13 @@ class Page:
 
 		return query_params
 
-	def search_page(self, id, title, redirect, redirected_from, num_recursions=0):
+	def _search_page(self, id, title, redirect, redirected_from, num_recursions=0):
 		if num_recursions > 3:
 			raise RecursionError()
-		print(dict(title=title, id=id, redirect=redirect, redirected_from=redirected_from, num_recursions=num_recursions))
+		# print(dict(title=title, id=id, redirect=redirect, redirected_from=redirected_from, num_recursions=num_recursions))
 
-		search_query_parameters = self.get_search_parameters(id=id, title=title)
-		search_request = self.api.request(search_query_parameters)
+		search_query_parameters = self._get_search_parameters(id=id, title=title)
+		search_request = self.request(parameters=search_query_parameters, format='json')
 
 		query = search_request['query']
 		id = list(query['pages'].keys())[0]
@@ -172,7 +187,7 @@ class Page:
 
 				# change the title and reload the whole object
 
-				return self.search_page(
+				return self._search_page(
 					id=id, title=redirects['to'],
 					redirect=redirect, redirected_from=redirects['from'],
 					num_recursions=num_recursions+1
@@ -189,84 +204,147 @@ class Page:
 		else:
 			return {'id': str(id), 'title': title, 'page': page, 'redirected_from': redirected_from}
 
-
-
 	def load(self):
-
-
-
-		self.pensieve.store(
+		self._pensieve.store(
 			key='search_result', precursors=['original_title', 'original_id', 'redirect'],
-			function=lambda x: self.search_page(
+			function=lambda x: self._search_page(
 				title=x['original_title'], id=x['original_id'], redirect=x['redirect'],
 				redirected_from=None
 			)
 		)
 
 		for key in ['id', 'title', 'page', 'redirected_from']:
-			self.pensieve.store(key, precursors=['search_result'], function=lambda x: x[key])
-		self.pensieve.store(key='url', precursors=['page'], function=lambda x: x['fullurl'], evaluate=False)
+			self._pensieve.store(key, precursors=['search_result'], function=lambda x: x[key])
+		self._pensieve.store(key='url', precursors=['page'], function=lambda x: x['fullurl'], evaluate=False)
 
-		self.pensieve.store(
-			key='html', precursors=['id', 'title'], evaluate=False,
-			function=lambda x: self.get_html(id=x['id'], title=x['title'])
+		self._pensieve.store(
+			key='json', precursors=['id', 'title'], evaluate=False,
+			function=lambda x: self._get_json(id=x['id'], title=x['title'])
 		)
 
-		self.pensieve.store(
-			key='parsed_html', precursors=['html'], evaluate=False,
-			function=lambda x: BeautifulSoup(x, 'html.parser')
+		'''
+		self._pensieve.store(
+			key='parsed_json', precursors=['json'], evaluate=False,
+			function=lambda x: BeautifulSoup(x, 'lxml')
+		)
+		'''
+
+		self._pensieve.store(
+			key='url_response', precursors=['url'],
+			function=lambda x: self.request(url=x, format='response'), evaluate=False
 		)
 
-		self.pensieve.store(
+		self._pensieve.store(
+			key='parsed_html', precursors=['url_response'], evaluate=False,
+			function=lambda x: BeautifulSoup(x.text, 'lxml')
+		)
+
+		self._pensieve.store(
 			key='links', precursors=['parsed_html'], evaluate=False,
-			function=lambda x: self.get_links(x)
+			function=lambda x: self._get_links(x)
 		)
 
-		self.pensieve.store(
+		self._pensieve.store(
 			key='summary', precursors=['id', 'title'], evaluate=False,
-			function=lambda x: self.get_summary(id=x['id'], title=x['title'])
+			function=lambda x: self._get_summary(id=x['id'], title=x['title'])
 		)
 
-		self.pensieve.store(
+		self._pensieve.store(
 			key='content', precursors=['id', 'title'], evaluate=False,
-			function=lambda x: self.get_content(id=x['id'], title=x['title'])
+			function=lambda x: self._get_content(id=x['id'], title=x['title'])
 		)
 
-		self.pensieve.store(
+		self._pensieve.store(
 			key='extract', precursors=['content'], evaluate=False, materialize=False,
 			function=lambda x: x['extract']
 		)
 
-		self.pensieve.store(
+		self._pensieve.store(
 			key='revision_id', precursors=['content'], evaluate=False, materialize=False,
 			function=lambda x: x['revisions'][0]['revid']
 		)
 
-		self.pensieve.store(
+		self._pensieve.store(
 			key='parent_id', precursors=['content'], evaluate=False, materialize=False,
 			function=lambda x: x['revisions'][0]['parentid']
 		)
 
+		'''
+		self._pensieve.store(
+			key='info_box', precursors=['parsed_html'], evaluate=False, materialize=False,
+			function=lambda x: x.find('table', {'class': re.compile('infobox.+vcard')})
+		)
+		'''
+
+		self._pensieve.store(
+			key='info_box', precursors=['url_response'], evaluate=False, materialize=True,
+			function=lambda x: self._get_info_box(x.text)
+		)
+
+		# # # Persons:
+
+		self._pensieve.store(
+			key='birthdate', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_date_in_info_box(info_box=x, label='born')
+		)
+
+		self._pensieve.store(
+			key='deathdate', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_date_in_info_box(info_box=x, label='died')
+		)
+
+		self._pensieve.store(
+			key='occupation', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_in_info_box(info_box=x, label='occupation')
+		)
+
+		# # # Companies
+
+		self._pensieve.store(
+			key='ticker', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_in_info_box(info_box=x, label='traded as')[0].text
+		)
+
+		self._pensieve.store(
+			key='isin', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_links_in_info_box(info_box=x, label='isin')
+		)
+
+		self._pensieve.store(
+			key='founders', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_links_in_info_box(info_box=x, label='founders')
+		)
+
+		self._pensieve.store(
+			key='founded', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_date_in_info_box(info_box=x, label='founded')
+		)
+
+		self._pensieve.store(
+			key='industry', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_links_in_info_box(info_box=x, label='industry')
+		)
+
+		self._pensieve.store(
+			key='headquarters', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_in_info_box(info_box=x, label='headquarters')[0].text
+		)
+
 		self._loaded = True
 
-	@property
-	def url(self):
-		if not self._loaded:
-			self.load()
-		return self.pensieve['url']
-
-	@property
-	def html_request(self):
-		if not self._loaded:
-			self.load()
-		return self.pensieve['html_request']
-
-	def get_html(self, id, title):
-		html_query_parameters = self.get_html_parameters(id=id, title=title)
-		html_request = self.api.request(html_query_parameters)
+	def _get_json(self, id, title):
+		html_query_parameters = self._get_html_parameters(id=id, title=title)
+		html_request = self.request(parameters=html_query_parameters, format='json')
 		return html_request['query']['pages'][id]['revisions'][0]['*']
 
-	def get_links(self, parsed_html):
+	@staticmethod
+	def _get_info_box(html):
+		strainer = SoupStrainer('table', {'class': re.compile('infobox.+vcard')})
+		soup = BeautifulSoup(html, 'lxml', parse_only=strainer)
+		return soup
+
+	@staticmethod
+	def _get_links(parsed_html):
 		links = parsed_html.find_all('li')
 		filtered_links = [
 			{'link': li, 'text': li.a.get_text() if li.a else None}
@@ -274,54 +352,39 @@ class Page:
 		]
 		return filtered_links
 
-	def get_summary(self, id, title):
-		summary_query_parameters = self.get_summary_parameters(id=id, title=title)
-		summary_request = self.api.request(summary_query_parameters)
+	def _get_summary(self, id, title):
+		summary_query_parameters = self._get_summary_parameters(id=id, title=title)
+		summary_request = self.request(parameters=summary_query_parameters)
 		return summary_request['query']['pages'][id]['extract']
 
-	def get_content(self, id, title):
-		content_parameters = self.get_content_parameters(id=id, title=title)
-		content_request = self.api.request(content_parameters)
+	def _get_content(self, id, title):
+		content_parameters = self._get_content_parameters(id=id, title=title)
+		content_request = self.request(parameters=content_parameters)
 		return content_request['query']['pages'][id]
 
-	@property
-	def html(self):
-		if not self._loaded:
-			self.load()
-		return self.pensieve['html']
+	@staticmethod
+	def _find_in_info_box(info_box, label):
+		def __get_th_text(tr):
+			try:
+				return tr.find('th').text.lower()
+			except:
+				return ''
 
-	@property
-	def links(self):
-		if not self._loaded:
-			self.load()
-		return self.pensieve['links']
+		return [tr for tr in info_box.find_all('tr') if label in __get_th_text(tr=tr)]
 
-	@property
-	def summary(self):
-		if not self._loaded:
-			self.load()
-		return self.pensieve['summary']
+	@classmethod
+	def _find_links_in_info_box(cls, info_box, label):
+		trs = cls._find_in_info_box(info_box=info_box, label=label)
+		return [{'link': link.get('href'), 'text': link.get_text()} for tr in trs for link in tr.find_all('a')]
 
-	@property
-	def content(self):
-		if not self._loaded:
-			self.load()
-		return self.pensieve['content']
+	@classmethod
+	def _find_date_in_info_box(cls, info_box, label):
+		trs = cls._find_in_info_box(info_box=info_box, label=label)
+		dates = [date for tr in trs for date in datefinder.find_dates(tr.text)]
+		if len(dates) > 0:
+			return dates[0]
+		else:
+			return None
 
-	@property
-	def extract(self):
-		if not self._loaded:
-			self.load()
-		return self.pensieve['extract']
-
-	@property
-	def revision_id(self):
-		if not self._loaded:
-			self.load()
-		return self.pensieve['revision_id']
-
-	@property
-	def parent_id(self):
-		if not self._loaded:
-			self.load()
-		return self.pensieve['parent_id']
+	def __getitem__(self, item):
+		return self.pensieve[item]
