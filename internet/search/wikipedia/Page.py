@@ -4,6 +4,7 @@ import re
 import datefinder
 
 from .exceptions import PageError, RedirectError, DisambiguationError, ODD_ERROR_MESSAGE
+from .Subject import InfoBox
 
 
 class Page:
@@ -278,7 +279,7 @@ class Page:
 
 		self._pensieve.store(
 			key='info_box', precursors=['url_response'], evaluate=False, materialize=True,
-			function=lambda x: self._get_info_box(x.text)
+			function=lambda x: InfoBox(html=x.text)
 		)
 
 		# # # Persons:
@@ -338,10 +339,9 @@ class Page:
 		return html_request['query']['pages'][id]['revisions'][0]['*']
 
 	@staticmethod
-	def _get_info_box(html):
-		strainer = SoupStrainer('table', {'class': re.compile('infobox.+vcard')})
-		soup = BeautifulSoup(html, 'lxml', parse_only=strainer)
-		return soup
+	def _get_subject(html):
+		return Subject(html)
+
 
 	@staticmethod
 	def _get_links(parsed_html):
