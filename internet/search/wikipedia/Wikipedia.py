@@ -61,6 +61,14 @@ class Wikipedia:
 			self._rate_limit_last_call = get_now()
 		return result
 
+	def get_page(self, id=None, url=None, title=None, namespace=0, redirect=True):
+		"""
+		:type id: int or str or NoneType
+		:type title: str or NoneType
+		:rtype: Page
+		"""
+		return Page(id=id, url=url, title=title, namespace=namespace, api=self, redirect=redirect)
+
 	def search(self, query, num_results=10, redirect=True):
 		"""
 		Do a Wikipedia search for `query`.
