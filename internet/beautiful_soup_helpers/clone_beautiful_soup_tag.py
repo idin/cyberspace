@@ -1,10 +1,16 @@
 from bs4 import Tag, NavigableString
 
+
 def clone_beautiful_soup_tag(element):
+    """
+    :type element: Tag
+    :rtype: Tag
+    """
     if isinstance(element, NavigableString):
         return type(element)(element)
 
     copy = Tag(None, element.builder, element.name, element.namespace, element.nsprefix)
+
     # work around bug where there is no builder set
     # https://bugs.launchpad.net/beautifulsoup/+bug/1307471
     copy.attrs = dict(element.attrs)
