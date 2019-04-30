@@ -11,34 +11,10 @@ def separate_row_header(row):
 	else:
 		return header, row
 
+
 def separate_row_headers(table):
 	"""
 	:param table:
 	:rtype: list
 	"""
 	return [separate_row_header(row) for row in table.find_all('tr')]
-
-def parse_link(link):
-	result = {}
-	try:
-		result['title'] = link['title']
-	except KeyError:
-		pass
-
-	try:
-		result['url'] = link['href']
-	except KeyError:
-		pass
-
-	try:
-		text = link.text
-		if text:
-			if len(text) > 0:
-				result['text'] = link.text
-	except AttributeError:
-		pass
-
-	if len(result) > 0:
-		return result
-	else:
-		return None
