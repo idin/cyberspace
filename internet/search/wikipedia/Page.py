@@ -1,35 +1,199 @@
-from bs4 import BeautifulSoup, SoupStrainer
+from bs4 import BeautifulSoup
 from pensieve import Pensieve
-import re
 import datefinder
 
 from .exceptions import PageError, RedirectError, DisambiguationError, ODD_ERROR_MESSAGE
-from .Subject import InfoBox
-
+from .InfoBox import InfoBox
+from .get_wikipedia_id import get_wikipedia_id
+from ...beautiful_soup_helpers import get_lists
 
 class Page:
-	def __init__(self, api=None, id=None, title=None, namespace=None, redirect=True, redirected_from=None):
+	def __init__(self, api=None, id=None, url=None, title=None, namespace=None, redirect=True, redirected_from=None):
 		self._api = api
 		self._pensieve = Pensieve(safe=True)
-		if id or title:
+		if id or title or url:
 			pass
 		else:
-			raise ValueError('Either id or title should be given!')
+			raise ValueError('Either id or title or url should be given!')
 
-		self._pensieve.store('original_id', content=id)
-		self._pensieve.store('original_title', content=title)
-		self._pensieve.store('namespace', content=namespace)
-		self._pensieve.store('redirect', content=redirect)
-		self._pensieve.store('redirected_from', content=redirected_from)
-		self._loaded = False
+
+		self._pensieve['namespace'] = namespace
+		self._pensieve['redirect'] = redirect
+		self._pensieve['redirected_from'] = redirected_from
+		if id:
+			self._pensieve['original_id'] = id
+			self._load_from_id()
+
+		elif url:
+			self._pensieve['url'] = url
+			self._load_from_url()
+
+		elif title:
+			self._pensieve['original_title'] = title
+			self._load_from_title()
+
+		self._load_the_rest()
+
+	def _parse_search_results(self):
+		for key in ['id', 'title', 'page', 'redirected_from', 'language', 'namespace', 'full_url']:
+			self._pensieve.store(key, precursors=['search_result'], function=lambda x: x[key])
+
+		self._pensieve.store(
+			key='json', precursors=['id', 'title'], evaluate=False,
+			function=lambda x: self._get_json(id=x['id'], title=x['title'])
+		)
+
+	def _get_url_response(self):
+		self._pensieve.store(
+			key='url_response', precursors=['url'], evaluate=False,
+			function=lambda x: self.request(url=x, format='response')
+		)
+
+	def _load_from_url(self):
+		self._get_url_response()
+		self._pensieve.store(
+			key='original_id', precursors=['url_response'], evaluate=False,
+			function=lambda x: get_wikipedia_id(x.text)
+		)
+		self._pensieve.store(
+			key='search_result', precursors=['original_id', 'redirect'], evaluate=False,
+			function=lambda x: self._search_page(
+				title=None, id=x['original_id'], redirect=x['redirect'],
+				redirected_from=None
+			)
+		)
+		self._parse_search_results()
+
+	def _load_from_id(self):
+		self._pensieve.store(
+			key='search_result', precursors=['original_id', 'redirect'], evaluate=False,
+			function=lambda x: self._search_page(
+				title=None, id=x['original_id'], redirect=x['redirect'],
+				redirected_from=None
+			)
+		)
+		self._parse_search_results()
+		self._pensieve.store(key='url', precursors=['page'], function=lambda x: x['fullurl'], evaluate=False)
+		self._get_url_response()
+
+	def _load_from_title(self):
+		self._pensieve.store(
+			key='search_result', precursors=['original_title', 'redirect'], evaluate=False,
+			function=lambda x: self._search_page(
+				title=x['original_title'], id=None, redirect=x['redirect'],
+				redirected_from=None
+			)
+		)
+		self._parse_search_results()
+		self._pensieve.store(key='url', precursors=['page'], function=lambda x: x['fullurl'], evaluate=False)
+		self._get_url_response()
+
+	def _load_the_rest(self):
+		self._pensieve.store(
+			key='base_url', precursors=['url'], evaluate=False, materialize=False,
+			function=lambda x: x[:x.find('/wiki/')]
+		)
+
+		self._pensieve.store(
+			key='parsed_html', precursors=['url_response'], evaluate=False,
+			function=lambda x: BeautifulSoup(x.text, 'lxml')
+		)
+
+		self._pensieve.store(
+			key='lists', precursors=['parsed_html', 'base_url'], evaluate=False,
+			function=lambda x: get_lists(element=x['parsed_html'], links_only=True, base=x['base_url'])
+		)
+
+		self._pensieve.store(
+			key='links', precursors=['parsed_html'], evaluate=False,
+			function=lambda x: self._get_links(x)
+		)
+
+		self._pensieve.store(
+			key='summary', precursors=['id', 'title'], evaluate=False,
+			function=lambda x: self._get_summary(id=x['id'], title=x['title'])
+		)
+
+		self._pensieve.store(
+			key='content', precursors=['id', 'title'], evaluate=False,
+			function=lambda x: self._get_content(id=x['id'], title=x['title'])
+		)
+
+		self._pensieve.store(
+			key='extract', precursors=['content'], evaluate=False, materialize=False,
+			function=lambda x: x['extract']
+		)
+
+		self._pensieve.store(
+			key='revision_id', precursors=['content'], evaluate=False, materialize=False,
+			function=lambda x: x['revisions'][0]['revid']
+		)
+
+		self._pensieve.store(
+			key='parent_id', precursors=['content'], evaluate=False, materialize=False,
+			function=lambda x: x['revisions'][0]['parentid']
+		)
+
+		self._pensieve.store(
+			key='info_box', precursors=['url_response'], evaluate=False, materialize=True,
+			function=lambda x: InfoBox(html=x.text)
+		)
+
+		# # # Persons:
+
+		self._pensieve.store(
+			key='birthdate', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_date_in_info_box(info_box=x, label='born')
+		)
+
+		self._pensieve.store(
+			key='deathdate', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_date_in_info_box(info_box=x, label='died')
+		)
+
+		self._pensieve.store(
+			key='occupation', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_in_info_box(info_box=x, label='occupation')
+		)
+
+		# # # Companies
+
+		self._pensieve.store(
+			key='ticker', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_in_info_box(info_box=x, label='traded as')[0].text
+		)
+
+		self._pensieve.store(
+			key='isin', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_links_in_info_box(info_box=x, label='isin')
+		)
+
+		self._pensieve.store(
+			key='founders', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_links_in_info_box(info_box=x, label='founders')
+		)
+
+		self._pensieve.store(
+			key='founded', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_date_in_info_box(info_box=x, label='founded')
+		)
+
+		self._pensieve.store(
+			key='industry', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_links_in_info_box(info_box=x, label='industry')
+		)
+
+		self._pensieve.store(
+			key='headquarters', precursors=['info_box'], evaluate=False, materialize=True,
+			function=lambda x: self._find_in_info_box(info_box=x, label='headquarters')[0].text
+		)
+
 
 	@property
 	def pensieve(self):
 		"""
 		:rtype: Pensieve
 		"""
-		if not self._loaded:
-			self.load()
 		return self._pensieve
 
 	@property
@@ -39,7 +203,7 @@ class Page:
 	def clear(self):
 		new_pensieve = Pensieve(safe=True)
 		for key in ['original_id', 'original_title', 'namespace', 'redirect', 'redirected_from']:
-			new_pensieve.store(key=key, content=self.pensieve[key])
+			new_pensieve[key] = self.pensieve[key]
 		self._pensieve = new_pensieve
 		self._loaded = False
 
@@ -163,6 +327,10 @@ class Page:
 		query = search_request['query']
 		id = list(query['pages'].keys())[0]
 		page = query['pages'][id]
+		title = page['title']
+		full_url = page['fullurl']
+		language = page['pagelanguage']
+		namespace = page['ns']
 
 		# missing is present if the page is missing
 
@@ -203,135 +371,10 @@ class Page:
 			raise DisambiguationError(title=title, may_refer_to=['poof'])
 
 		else:
-			return {'id': str(id), 'title': title, 'page': page, 'redirected_from': redirected_from}
-
-	def load(self):
-		self._pensieve.store(
-			key='search_result', precursors=['original_title', 'original_id', 'redirect'],
-			function=lambda x: self._search_page(
-				title=x['original_title'], id=x['original_id'], redirect=x['redirect'],
-				redirected_from=None
-			)
-		)
-
-		for key in ['id', 'title', 'page', 'redirected_from']:
-			self._pensieve.store(key, precursors=['search_result'], function=lambda x: x[key])
-		self._pensieve.store(key='url', precursors=['page'], function=lambda x: x['fullurl'], evaluate=False)
-
-		self._pensieve.store(
-			key='json', precursors=['id', 'title'], evaluate=False,
-			function=lambda x: self._get_json(id=x['id'], title=x['title'])
-		)
-
-		'''
-		self._pensieve.store(
-			key='parsed_json', precursors=['json'], evaluate=False,
-			function=lambda x: BeautifulSoup(x, 'lxml')
-		)
-		'''
-
-		self._pensieve.store(
-			key='url_response', precursors=['url'],
-			function=lambda x: self.request(url=x, format='response'), evaluate=False
-		)
-
-		self._pensieve.store(
-			key='parsed_html', precursors=['url_response'], evaluate=False,
-			function=lambda x: BeautifulSoup(x.text, 'lxml')
-		)
-
-		self._pensieve.store(
-			key='links', precursors=['parsed_html'], evaluate=False,
-			function=lambda x: self._get_links(x)
-		)
-
-		self._pensieve.store(
-			key='summary', precursors=['id', 'title'], evaluate=False,
-			function=lambda x: self._get_summary(id=x['id'], title=x['title'])
-		)
-
-		self._pensieve.store(
-			key='content', precursors=['id', 'title'], evaluate=False,
-			function=lambda x: self._get_content(id=x['id'], title=x['title'])
-		)
-
-		self._pensieve.store(
-			key='extract', precursors=['content'], evaluate=False, materialize=False,
-			function=lambda x: x['extract']
-		)
-
-		self._pensieve.store(
-			key='revision_id', precursors=['content'], evaluate=False, materialize=False,
-			function=lambda x: x['revisions'][0]['revid']
-		)
-
-		self._pensieve.store(
-			key='parent_id', precursors=['content'], evaluate=False, materialize=False,
-			function=lambda x: x['revisions'][0]['parentid']
-		)
-
-		'''
-		self._pensieve.store(
-			key='info_box', precursors=['parsed_html'], evaluate=False, materialize=False,
-			function=lambda x: x.find('table', {'class': re.compile('infobox.+vcard')})
-		)
-		'''
-
-		self._pensieve.store(
-			key='info_box', precursors=['url_response'], evaluate=False, materialize=True,
-			function=lambda x: InfoBox(html=x.text)
-		)
-
-		# # # Persons:
-
-		self._pensieve.store(
-			key='birthdate', precursors=['info_box'], evaluate=False, materialize=True,
-			function=lambda x: self._find_date_in_info_box(info_box=x, label='born')
-		)
-
-		self._pensieve.store(
-			key='deathdate', precursors=['info_box'], evaluate=False, materialize=True,
-			function=lambda x: self._find_date_in_info_box(info_box=x, label='died')
-		)
-
-		self._pensieve.store(
-			key='occupation', precursors=['info_box'], evaluate=False, materialize=True,
-			function=lambda x: self._find_in_info_box(info_box=x, label='occupation')
-		)
-
-		# # # Companies
-
-		self._pensieve.store(
-			key='ticker', precursors=['info_box'], evaluate=False, materialize=True,
-			function=lambda x: self._find_in_info_box(info_box=x, label='traded as')[0].text
-		)
-
-		self._pensieve.store(
-			key='isin', precursors=['info_box'], evaluate=False, materialize=True,
-			function=lambda x: self._find_links_in_info_box(info_box=x, label='isin')
-		)
-
-		self._pensieve.store(
-			key='founders', precursors=['info_box'], evaluate=False, materialize=True,
-			function=lambda x: self._find_links_in_info_box(info_box=x, label='founders')
-		)
-
-		self._pensieve.store(
-			key='founded', precursors=['info_box'], evaluate=False, materialize=True,
-			function=lambda x: self._find_date_in_info_box(info_box=x, label='founded')
-		)
-
-		self._pensieve.store(
-			key='industry', precursors=['info_box'], evaluate=False, materialize=True,
-			function=lambda x: self._find_links_in_info_box(info_box=x, label='industry')
-		)
-
-		self._pensieve.store(
-			key='headquarters', precursors=['info_box'], evaluate=False, materialize=True,
-			function=lambda x: self._find_in_info_box(info_box=x, label='headquarters')[0].text
-		)
-
-		self._loaded = True
+			return {
+				'id': str(id), 'title': title, 'page': page, 'redirected_from': redirected_from,
+				'full_url': full_url, 'language': language, 'namespace': namespace
+			}
 
 	def _get_json(self, id, title):
 		html_query_parameters = self._get_html_parameters(id=id, title=title)
@@ -354,7 +397,7 @@ class Page:
 
 	def _get_summary(self, id, title):
 		summary_query_parameters = self._get_summary_parameters(id=id, title=title)
-		summary_request = self.request(parameters=summary_query_parameters)
+		summary_request = self.request(parameters=summary_query_parameters, format='json')
 		return summary_request['query']['pages'][id]['extract']
 
 	def _get_content(self, id, title):
