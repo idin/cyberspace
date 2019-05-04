@@ -140,7 +140,7 @@ class Page:
 		)
 
 		# # # Persons:
-
+		'''
 		self._pensieve.store(
 			key='birthdate', precursors=['info_box'], evaluate=False, materialize=True,
 			function=lambda x: self._find_date_in_info_box(info_box=x, label='born')
@@ -187,7 +187,7 @@ class Page:
 			key='headquarters', precursors=['info_box'], evaluate=False, materialize=True,
 			function=lambda x: self._find_in_info_box(info_box=x, label='headquarters')[0].text
 		)
-
+		'''
 
 	@property
 	def pensieve(self):
@@ -382,11 +382,6 @@ class Page:
 		return html_request['query']['pages'][id]['revisions'][0]['*']
 
 	@staticmethod
-	def _get_subject(html):
-		return Subject(html)
-
-
-	@staticmethod
 	def _get_links(parsed_html):
 		links = parsed_html.find_all('li')
 		filtered_links = [
@@ -402,9 +397,14 @@ class Page:
 
 	def _get_content(self, id, title):
 		content_parameters = self._get_content_parameters(id=id, title=title)
-		content_request = self.request(parameters=content_parameters)
+		content_request = self.request(parameters=content_parameters, format='json')
 		return content_request['query']['pages'][id]
 
+
+
+
+
+	'''
 	@staticmethod
 	def _find_in_info_box(info_box, label):
 		def __get_th_text(tr):
@@ -414,12 +414,12 @@ class Page:
 				return ''
 
 		return [tr for tr in info_box.find_all('tr') if label in __get_th_text(tr=tr)]
-
+		
 	@classmethod
 	def _find_links_in_info_box(cls, info_box, label):
 		trs = cls._find_in_info_box(info_box=info_box, label=label)
 		return [{'link': link.get('href'), 'text': link.get_text()} for tr in trs for link in tr.find_all('a')]
-
+	
 	@classmethod
 	def _find_date_in_info_box(cls, info_box, label):
 		trs = cls._find_in_info_box(info_box=info_box, label=label)
@@ -428,6 +428,7 @@ class Page:
 			return dates[0]
 		else:
 			return None
+	'''
 
 	def __getitem__(self, item):
 		return self.pensieve[item]
