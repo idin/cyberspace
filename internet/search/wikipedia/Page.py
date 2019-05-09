@@ -1,16 +1,20 @@
 from bs4 import BeautifulSoup
+import re
+import warnings
 from pensieve import Pensieve
-import datefinder
+from slytherin.collections import flatten, remove_list_duplicates
+from abstract import Graph
+from interaction import iterate
 
-from .exceptions import PageError, RedirectError, DisambiguationError, ODD_ERROR_MESSAGE
+from .exceptions import PageError, RedirectError, ODD_ERROR_MESSAGE
 from .InfoBox import InfoBox
 from .get_wikipedia_id import get_wikipedia_id
-from ...beautiful_soup_helpers import get_lists
+from ...beautiful_soup_helpers import get_lists, find_links, clone_beautiful_soup_tag, parse_link
 
 class Page:
-	def __init__(self, api=None, id=None, url=None, title=None, namespace=None, redirect=True, redirected_from=None):
+	def __init__(self, api=None, id=None, url=None, title=None, namespace=None, redirect=True, disambiguation_url=None):
 		self._api = api
-		self._pensieve = Pensieve(safe=True)
+		self._pensieve = Pensieve(safe=False)
 		if id or title or url:
 			pass
 		else:
@@ -19,7 +23,8 @@ class Page:
 
 		self._pensieve['namespace'] = namespace
 		self._pensieve['redirect'] = redirect
-		self._pensieve['redirected_from'] = redirected_from
+		self._pensieve['disambiguation_url'] = disambiguation_url
+		#self._pensieve['redirected_from'] = redirected_from
 		if id:
 			self._pensieve['original_id'] = id
 			self._load_from_id()
@@ -34,9 +39,27 @@ class Page:
 
 		self._load_the_rest()
 
+	@staticmethod
+	def _get_disambiguation_results(disambiguation, parsed_html, base_url):
+		if disambiguation:
+			original_content = parsed_html.find(attrs={'id': 'bodyContent'}).find(attrs={'id': 'mw-content-text'})
+			content = clone_beautiful_soup_tag(element=original_content)
+			disambigbox = content.find(attrs={'id': 'disambigbox'})
+			if disambigbox:
+				disambigbox.extract()
+			printfooter = content.find(attrs={'class': 'printfooter'})
+			if printfooter:
+				printfooter.extract()
+			links = find_links(element=content, base=base_url)
+			return [link for link in links if '/index.php?' not in link['url']]
+		else:
+			return []
+
 	def _parse_search_results(self):
-		for key in ['id', 'title', 'page', 'redirected_from', 'language', 'namespace', 'full_url']:
+		for key in ['id', 'title', 'page', 'redirected_from', 'language', 'namespace', 'full_url', 'disambiguation']:
 			self._pensieve.store(key, precursors=['search_result'], function=lambda x: x[key])
+
+
 
 		self._pensieve.store(
 			key='json', precursors=['id', 'title'], evaluate=False,
@@ -51,6 +74,7 @@ class Page:
 
 	def _load_from_url(self):
 		self._get_url_response()
+
 		self._pensieve.store(
 			key='original_id', precursors=['url_response'], evaluate=False,
 			function=lambda x: get_wikipedia_id(x.text)
@@ -100,13 +124,65 @@ class Page:
 		)
 
 		self._pensieve.store(
-			key='lists', precursors=['parsed_html', 'base_url'], evaluate=False,
-			function=lambda x: get_lists(element=x['parsed_html'], links_only=True, base=x['base_url'])
+			key='disambiguation_results',
+			precursors=['disambiguation', 'parsed_html', 'base_url'],
+			evaluate=False,
+			function=lambda x: self._get_disambiguation_results(
+				disambiguation=x['disambiguation'], parsed_html=x['parsed_html'], base_url=x['base_url']
+			)
 		)
 
 		self._pensieve.store(
-			key='links', precursors=['parsed_html'], evaluate=False,
-			function=lambda x: self._get_links(x)
+			key='link_and_anchor_lists', precursors=['parsed_html', 'base_url'], evaluate=False,
+			function=lambda x: get_lists(element=x['parsed_html'], links_only=True, base=x['base_url'])
+		)
+
+		#	ANCHORS IN A PAGE
+		def _remove_nonanchors(link_lists):
+			if isinstance(link_lists, list):
+				result = [_remove_nonanchors(ll) for ll in link_lists if ll]
+				result = [x for x in result if x is not None]
+				result = [x for x in result if len(x) > 0]
+				if len(result) > 1:
+					return result
+				elif len(result) == 1:
+					return result[0]
+				else:
+					return None
+			elif isinstance(link_lists, dict):
+				if not link_lists['url'].startswith('#'):
+					return None
+				else:
+					return link_lists
+
+		self._pensieve.store(
+			key='anchor_lists', precursors=['link_and_anchor_lists'], evaluate=False,
+			function=_remove_nonanchors
+		)
+
+		# 	LINKS IN A PAGE
+		def _remove_anchors(link_lists):
+			if isinstance(link_lists, list):
+				result = [_remove_anchors(ll) for ll in link_lists if ll]
+				result = [x for x in result if x is not None]
+				result = [x for x in result if len(x)>0]
+				if len(result) > 1:
+					return result
+				elif len(result) == 1:
+					return result[0]
+				else:
+					return None
+			elif isinstance(link_lists, dict):
+				if 'url' not in link_lists:
+					print(link_lists)
+				if link_lists['url'].startswith('#'):
+					return None
+				else:
+					return link_lists
+
+		self._pensieve.store(
+			key='link_lists', precursors=['link_and_anchor_lists'], evaluate=False,
+			function=_remove_anchors
 		)
 
 		self._pensieve.store(
@@ -189,6 +265,36 @@ class Page:
 		)
 		'''
 
+
+	def get_graph(self, max_depth=1, strict=True, ordering=True, echo=1):
+		graph = Graph(obj=None, strict=strict, ordering=ordering)
+		def _crawl(graph, page, max_depth, parent_page, depth, echo):
+			if page['id'] not in graph:
+				graph.add_node(name=page['id'], label=page['title'], value=page['url'])
+				if depth < max_depth:
+					link_lists = page['link_lists']
+					if link_lists:
+						urls = remove_list_duplicates([link['url'] for link in flatten(link_lists)])
+						if link_lists:
+							for url in iterate(iterable=urls, echo=echo, text=page['title']):
+								if re.match('^https://.+\.wikipedia.org/', url):
+									try:
+										child_page = Page(api=page.api, url=url)
+										_crawl(
+											graph=graph, page=child_page, parent_page=page, max_depth=max_depth,
+											depth=depth+1, echo=echo
+										)
+									except KeyError as e:
+										warnings.warn(str(e))
+			if parent_page:
+				graph.connect(start=parent_page['id'], end=page['id'])
+
+		if echo:
+			print(self['url'])
+		_crawl(graph=graph, page=self, max_depth=max_depth, parent_page=None, depth=0, echo=echo)
+
+		return graph
+
 	@property
 	def pensieve(self):
 		"""
@@ -205,11 +311,10 @@ class Page:
 		for key in ['original_id', 'original_title', 'namespace', 'redirect', 'redirected_from']:
 			new_pensieve[key] = self.pensieve[key]
 		self._pensieve = new_pensieve
-		self._loaded = False
 
 	@staticmethod
 	def _get_state_attributes():
-		return ['_loaded', '_pensievea']
+		return ['_pensieve']
 
 	def __getstate__(self):
 		return {name: getattr(self, name) for name in self._get_state_attributes()}
@@ -234,7 +339,11 @@ class Page:
 			return self._pensieve['original_id']
 
 	def __str__(self):
-		return f'Wikipedia Page: {self.title} (id:{self.id})'
+		if 'url' in self._pensieve:
+			url = self._pensieve['url']
+			return f'{self.title}: {url}'
+		else:
+			return f'{self.title}: {self.id}'
 
 	def __repr__(self):
 		return str(self)
@@ -368,12 +477,15 @@ class Page:
 		# if a pageprop is returned,
 		# then the page must be a disambiguation page
 		elif 'pageprops' in page:
-			raise DisambiguationError(title=title, may_refer_to=['poof'])
+			return {
+				'id': str(id), 'title': title, 'page': page, 'redirected_from': redirected_from,
+				'full_url': full_url, 'language': language, 'namespace': namespace, 'disambiguation': True
+			}
 
 		else:
 			return {
 				'id': str(id), 'title': title, 'page': page, 'redirected_from': redirected_from,
-				'full_url': full_url, 'language': language, 'namespace': namespace
+				'full_url': full_url, 'language': language, 'namespace': namespace, 'disambiguation': False
 			}
 
 	def _get_json(self, id, title):
@@ -382,13 +494,10 @@ class Page:
 		return html_request['query']['pages'][id]['revisions'][0]['*']
 
 	@staticmethod
-	def _get_links(parsed_html):
-		links = parsed_html.find_all('li')
-		filtered_links = [
-			{'link': li, 'text': li.a.get_text() if li.a else None}
-			for li in links if 'tocsection' not in ''.join(li.get('class', []))
-		]
-		return filtered_links
+	def _get_links(parsed_html, base_url):
+		links = parsed_html.find_all('a')
+		parsed_links = [parse_link(link, base=base_url) for link in links]
+		return [link for link in parsed_links if link]
 
 	def _get_summary(self, id, title):
 		summary_query_parameters = self._get_summary_parameters(id=id, title=title)
@@ -432,3 +541,6 @@ class Page:
 
 	def __getitem__(self, item):
 		return self.pensieve[item]
+
+	def __graph__(self):
+		return self._pensieve.__graph__()
