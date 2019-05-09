@@ -1,9 +1,9 @@
 from bs4 import Tag
 from .clone_beautiful_soup_tag import clone_beautiful_soup_tag
-from .parse_link import parse_link
+from .find_links import parse_link, find_links
 
 
-def get_items(element, **kwargs):
+def find_all(element, **kwargs):
 	"""
 	:type element: Tag
 	:rtype: list
@@ -18,36 +18,26 @@ def get_items(element, **kwargs):
 	return result
 
 
+def get_items(list_element, links_only=False, base=None):
+	items = find_all(element=list_element, name='li')
+	results = [get_lists(i, links_only=links_only, base=base) for i in items]
+	return [x for x in results if x is not None]
+
+
 def get_lists(element, links_only=False, base=None):
-	"""
-	:type element: Tag
-	:rtype: list
-	"""
-	result = get_items(element=element, name='ul')
-	if links_only:
-		return [
-			get_items_in_list(x, links_only=links_only, base=base) if x.find('li') else [
-				parse_link(link, base=base) for link in x.find_all('a') or []
-			]
-			for x in result
-		]
+	if element.find('ul'):
+		lists = find_all(element=element, name='ul')
+		return [get_items(l, links_only=links_only, base=base) for l in lists]
 	else:
-		return [get_items_in_list(x, links_only=links_only) if x.find('li') else x.contents for x in result]
+		if links_only:
+			links = find_links(element=element, base=base)
+			if len(links) == 0:
+				return None
+			elif len(links) == 1:
+				return links[0]
+			else:
+				return links
+		else:
+			return element
 
-
-def get_items_in_list(element, links_only=False, base=None):
-	"""
-	:type element: Tag
-	:rtype: list
-	"""
-	result = get_items(element=element, name='li')
-	if links_only:
-		return [
-			get_lists(x, links_only=links_only, base=base) if x.find(name='ul') else [
-				parse_link(link, base=base) for link in x.find_all('a') or []
-			]
-			for x in result
-		]
-	else:
-		return [get_lists(x, links_only=links_only) if x.find(name='ul') else x.contents for x in result]
 
