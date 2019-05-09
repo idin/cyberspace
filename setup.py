@@ -29,7 +29,7 @@ setup(
 	],
 
 	packages=find_packages(exclude=["jupyter_tests", ".idea", ".git"]),
-	install_requires=['requests', 'bs4', 'selenium', 'chronology', 'fake_useragent', 'datefinder'],
+	install_requires=['requests', 'bs4', 'selenium', 'chronology', 'fake_useragent', 'datefinder', 'slytherin'],
 	python_requires='~=3.6',
 	zip_safe=False
 )
