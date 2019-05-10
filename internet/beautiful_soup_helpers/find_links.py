@@ -1,9 +1,14 @@
 def parse_link(link, base=None):
 	result = {}
+	try:
+		if link.find('a'):
+			link = link.find('a')
+	except:
+		pass
 
 	try:
 		href = link['href']
-		if 'http:' in href or 'https:' in href or base is None or href.startswith('#'):
+		if href.startswith('http') or base is None or href.startswith('#'):
 			result['url'] = href
 		else:
 			result['url'] = (base + href)
