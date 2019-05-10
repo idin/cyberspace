@@ -148,23 +148,31 @@ class Wikipedia:
 			else:
 				graph = Graph(obj=None, strict=strict, ordering=ordering)
 
-			def _crawl(graph, url, title, id, parent_page_url, max_depth, depth, echo):
+			def _crawl(graph, url, title, id, parent_page_url, max_depth, depth, echo, crawl_completed):
 				if url not in graph:
 					graph.add_node(name=url, label=title, value=id)
-					if depth < max_depth:
-						children = self.get_page_children(url=url, redirect=redirect, echo=echo)
-						for child in children:
-							_crawl(
-								graph=graph, url=child['url'], title=child['title'], id=child['url'],
-								parent_page_url=url, max_depth=max_depth, depth=depth + 1, echo=echo
-							)
+
 				if parent_page_url:
-					graph.connect(start=parent_page_url, end=url)
+					graph.connect(start=parent_page_url, end=url, if_edge_exists='ignore')
+
+				# to avoid crawling the children of a page for a second time we add the url of the parent page in
+				# crawl_completed at the end
+				if url not in crawl_completed and depth < max_depth:
+					children = self.get_page_children(url=url, redirect=redirect, echo=echo)
+					for child in children:
+						_crawl(
+							graph=graph, url=child['url'], title=child['title'], id=child['url'],
+							parent_page_url=url, max_depth=max_depth, depth=depth + 1, echo=echo,
+							crawl_completed=crawl_completed
+						)
+					crawl_completed.append(url)
+
+
 
 			page = self.get_page(id=id, url=url, title=title, namespace=namespace, redirect=redirect)
 			_crawl(
 				graph=graph, url=page['url'], title=page['title'], id=page['id'], parent_page_url=None,
-				max_depth=max_depth, echo=echo, depth=0
+				max_depth=max_depth, echo=echo, depth=0, crawl_completed=[]
 			)
 			return graph
 		except KeyboardInterrupt:
