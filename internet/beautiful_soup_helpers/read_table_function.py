@@ -1,5 +1,6 @@
 import pandas as pd
 import copy
+from collections import Counter
 
 from .clone_beautiful_soup_tag import clone_beautiful_soup_tag
 from .clean_html_text_function import clean_html_text
@@ -93,16 +94,24 @@ def read_table(table, text_only=False):
 				else:
 					cell_data = col
 
-				# Insert data into cell
-				if is_header:
-					if colspan is None:
-						num_columns_in_cell = 1
-					else:
-						num_columns_in_cell = int(colspan)
-					for i in range(num_columns_in_cell):
-						header.iat[header_row_counter, col_counter + i] = cell_data
+				# Insert data into cell all cells of a merged cell
+				if colspan is None:
+					num_columns_in_cell = 1
 				else:
-					dataframe.iat[row_counter, col_counter] = cell_data
+					num_columns_in_cell = int(colspan)
+
+				if rowspan is None:
+					num_rows_in_cell = 1
+				else:
+					num_rows_in_cell = int(rowspan)
+
+				if is_header:
+					for k in range(num_columns_in_cell):
+						header.iat[header_row_counter, col_counter + k] = cell_data
+				else:
+					for i in range(num_rows_in_cell):
+						for k in range(num_columns_in_cell):
+							dataframe.iat[row_counter + i, col_counter + k] = cell_data
 
 				# Record column skipping index
 				if row_dim[row_dim_counter] > 1:
@@ -117,5 +126,18 @@ def read_table(table, text_only=False):
 		# Adjust column skipping index
 		skip_index = [i - 1 if i > 0 else i for i in this_skip_index]
 	columns = [join_html_texts(header[col].values) for col in header.columns]
-	dataframe.columns = columns
+	column_name_counter = Counter(columns)
+	columns_with_number = []
+	column_numbers = {}
+	for column in columns:
+		if column_name_counter[column] > 1:
+			if column in column_numbers:
+				column_numbers[column] += 1
+			else:
+				column_numbers[column] = 1
+			columns_with_number.append(f'{column} {column_numbers[column]}')
+		else:
+			columns_with_number.append(column)
+
+	dataframe.columns = columns_with_number
 	return dataframe.reset_index(drop=True)
