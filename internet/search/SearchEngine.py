@@ -1,7 +1,5 @@
 from .. import Navigator
 from .Query import Query
-from datetime import datetime
-from chronology import get_elapsed_seconds
 
 
 class SearchEngine:
@@ -57,11 +55,10 @@ class SearchEngine:
 		:param callable or NoneType search_function: a function that can be called on html and returns results
 		:rtype: list
 		"""
-		start_time = datetime.now()
 		query = Query(
 			query=query, request_method=self._request_method,
 			get_json_back=self._get_json_back, element_id=element_id, arguments=kwargs,
-			timeout_exception=timeout_exception, parser=self._parser, start_time=start_time
+			timeout_exception=timeout_exception, parser=self._parser,
 		)
 		query.store(
 			key='url', precursors=['query', 'arguments'],
@@ -77,15 +74,5 @@ class SearchEngine:
 			)
 		)
 		self.parse_search_results(response_key=response_key, results_key='results', query=query)
-
-		end_time = datetime.now()
-		query.store(key='end_time', content=end_time)
-		query.store(
-			key='duration', precursors=['start_time', 'end_time'],
-			function=lambda x: get_elapsed_seconds(start=x['start_time'], end=x['end_time']),
-			materialize=False
-		)
-		self._elapsed_time += query['duration']
-		self._num_queries += 1
 
 		return query

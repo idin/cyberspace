@@ -13,7 +13,7 @@ from json import load as load_json
 import time
 from datetime import datetime
 import warnings
-from chronology import get_elapsed_seconds
+from chronology import Timer
 
 
 class Navigator:
@@ -44,10 +44,11 @@ class Navigator:
 		self._url = None
 		self._page_source = None
 		self._parsed_html = None
-		self._load_start_time = None
-		self._load_end_time = None
-		self._parse_start_time = None
-		self._parse_end_time = None
+		self._get_timer = Timer()
+		self._parse_timer = Timer()
+
+		self.get = self._get_timer.measure(function=self.get)
+		self.parse_html = self._parse_timer.measure(function=self._parse_html)
 
 	def __del__(self):
 		self.driver.quit()
@@ -67,9 +68,8 @@ class Navigator:
 			try:
 				element_present = expected_conditions.presence_of_all_elements_located((By.ID, element_id))
 				WebDriverWait(driver=self.driver, timeout=self._timeout).until(element_present)
-				self._load_end_time = datetime.now()
+
 			except TimeoutException:
-				self._load_end_time = None
 				self._page_source = None
 				if timeout_exception[0].lower == 'e':
 					raise TimeoutException(f'Timed out waiting for page:"{url}" to load!')
@@ -93,7 +93,7 @@ class Navigator:
 				html = response #.read().decode(encoding)
 			return html
 
-	def get(
+	def _get(
 			self, url, request_method=None, element_id=None, get_json_back=False,
 			timeout_exception='error', parser='lxml'
 	):
@@ -108,8 +108,6 @@ class Navigator:
 		self._url = url
 		request_method = request_method or self._default_request_method
 
-		self._load_start_time = datetime.now()
-
 		if request_method.lower() == 'urllib':
 			html = self._get_by_urllib(url=url, json=get_json_back)
 
@@ -119,7 +117,6 @@ class Navigator:
 		else:
 			raise ValueError(f'Unknown method: "{method}"!')
 
-		self._load_end_time = datetime.now()
 		self._page_source = html
 
 		if parser:
@@ -128,21 +125,19 @@ class Navigator:
 		else:
 			return self._page_source
 
-	def parse_html(self, html, parser='lxml'):
+	def _parse_html(self, html, parser='lxml'):
 		"""
 		:type parser: str
 		:type html: str
 		:rtype: BeautifulSoup
 		"""
-		self._parse_start_time = datetime.now()
 		self._parsed_html = BeautifulSoup(html, parser)
-		self._parse_end_time = datetime.now()
 		return self._parsed_html
 
 	@property
 	def loading_time(self):
-		return get_elapsed_seconds(start=self._load_start_time, end=self._load_end_time)
+		return self._get_timer.get_mean_elapsed(unit='sec')
 
 	@property
 	def parsing_time(self):
-		return get_elapsed_seconds(start=self._parse_start_time, end=self._parse_end_time)
+		return self._parse_timer.get_mean_elapsed(unit='sec')

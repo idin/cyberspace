@@ -1,1 +1,1 @@
-from .Wikipedia import Wikipedia
+from .Wikipedia_class import Wikipedia

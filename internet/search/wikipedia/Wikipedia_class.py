@@ -1,15 +1,12 @@
 # p
 from copy import deepcopy
 import requests
-import re
 import time
 import warnings
 
 # i
-from chronology import get_now, get_elapsed_seconds
-from slytherin.collections import remove_list_duplicates, flatten
+from chronology import MeasurementSet, get_elapsed, get_now
 from abstract import Graph
-from interaction import ProgressBar
 
 from .exceptions import HTTPTimeoutError, WikipediaException
 from .Page import Page
@@ -32,6 +29,7 @@ class Wikipedia:
 		self._user_agent = user_agent
 		self._rate_limit_wait = rate_limit_wait_seconds
 		self._rate_limit_last_call = None
+
 		self._cache = cache
 		if self._cache:
 			self.request = self._cache.make_cached(
@@ -39,13 +37,6 @@ class Wikipedia:
 				function=self._request,
 				condition_function=self._request_result_valid,
 				sub_directory='request'
-			)
-
-			self.get_page_children = self._cache.make_cached(
-				id='wikipedia_page_children_function',
-				function=self._get_page_children,
-				condition_function=None,
-				sub_directory='page_children'
 			)
 
 			self.get_title_and_id = self._cache.make_cached(
@@ -57,8 +48,16 @@ class Wikipedia:
 
 		else:
 			self.request = self._request
-			self.get_page_children = self._get_page_children
 			self.get_title_and_id = self._get_title_and_id
+
+		self._function_durations = MeasurementSet()
+
+	@property
+	def function_durations(self):
+		"""
+		:rtype: MeasurementSet
+		"""
+		return self._function_durations
 
 	@property
 	def language(self):
@@ -86,14 +85,12 @@ class Wikipedia:
 			if url is None:
 				raise ValueError('url cannot be empty for non-json request!')
 
-
 		headers = {'User-Agent': self._user_agent}
 
 		if self._rate_limit_wait and self._rate_limit_last_call:
-			wait_time = self._rate_limit_wait - get_elapsed_seconds(start=self._rate_limit_last_call, end=get_now())
-			if  wait_time > 0:
+			wait_time = self._rate_limit_wait - get_elapsed(start=self._rate_limit_last_call, unit='s')
+			if wait_time > 0:
 				time.sleep(wait_time)
-
 
 		if format == 'json':
 			r = requests.get(self.api_url, params=parameters, headers=headers)
@@ -110,6 +107,7 @@ class Wikipedia:
 	def get_page(self, id=None, url=None, title=None, namespace=0, redirect=True):
 		"""
 		:type id: int or str or NoneType
+		:type url: str or NoneType
 		:type title: str or NoneType
 		:rtype: Page
 		"""
@@ -117,26 +115,10 @@ class Wikipedia:
 
 	def _get_title_and_id(self, url, redirect):
 		try:
-			_page = Page(api=self, url=url, redirect=redirect)
+			_page = self.get_page(url=url, redirect=redirect)
 			return {'id': _page['id'], 'title': _page['title'], 'url': _page['url']}
 		except Exception as e:
 			return None
-
-	def _get_page_children(self, id=None, url=None, title=None, namespace=0, redirect=True, echo=1):
-		page = self.get_page(id=id, url=url, title=title, namespace=namespace, redirect=redirect)
-		link_lists = page['link_lists']
-		if link_lists:
-			urls = remove_list_duplicates([link['url'] for link in flatten(link_lists)])
-			wikipedia_urls = [url for url in urls if re.match('^https://.+\.wikipedia.org/', url)]
-			non_php_urls = [url for url in wikipedia_urls if '/index.php?' not in url]
-
-			pages = ProgressBar.map(
-				function=lambda x: self.get_title_and_id(url=x, redirect=redirect),
-				iterable=non_php_urls, echo=echo, text=page['url']
-			)
-			return [page for page in pages if page is not None]
-		else:
-			return []
 
 	def get_page_graph(
 			self, graph=None, id=None, url=None, title=None, namespace=0, redirect=True,
@@ -148,31 +130,28 @@ class Wikipedia:
 			else:
 				graph = Graph(obj=None, strict=strict, ordering=ordering)
 
-			def _crawl(graph, url, title, id, parent_page_url, max_depth, depth, echo, crawl_completed):
-				if url not in graph:
-					graph.add_node(name=url, label=title, value=id)
+			def _crawl(_graph, _page, _parent_page, _max_depth, _depth, _echo, _crawl_completed):
+				if _page['url'] not in _graph:
+					_graph.add_node(name=_page['url'], label=_page['title'], value=_page)
 
-				if parent_page_url:
-					graph.connect(start=parent_page_url, end=url, if_edge_exists='ignore')
+				if _parent_page is not None:
+					_graph.connect(start=_parent_page['url'], end=_page['url'], if_edge_exists='ignore')
 
 				# to avoid crawling the children of a page for a second time we add the url of the parent page in
 				# crawl_completed at the end
-				if url not in crawl_completed and depth < max_depth:
-					children = self.get_page_children(url=url, redirect=redirect, echo=echo)
-					for child in children:
+				if _page['url'] not in _crawl_completed and _depth < _max_depth:
+					for child in _page.get_children(echo=_echo):
 						_crawl(
-							graph=graph, url=child['url'], title=child['title'], id=child['url'],
-							parent_page_url=url, max_depth=max_depth, depth=depth + 1, echo=echo,
-							crawl_completed=crawl_completed
+							_graph=_graph, _page=child,
+							_parent_page=_page, _max_depth=_max_depth, _depth=_depth + 1, _echo=_echo,
+							_crawl_completed=_crawl_completed
 						)
-					crawl_completed.append(url)
-
-
+					_crawl_completed.append(_page['url'])
 
 			page = self.get_page(id=id, url=url, title=title, namespace=namespace, redirect=redirect)
 			_crawl(
-				graph=graph, url=page['url'], title=page['title'], id=page['id'], parent_page_url=None,
-				max_depth=max_depth, echo=echo, depth=0, crawl_completed=[]
+				_graph=graph, _page=page, _parent_page=None,
+				_max_depth=max_depth, _echo=echo, _depth=0, _crawl_completed=[]
 			)
 			return graph
 		except KeyboardInterrupt:
@@ -218,5 +197,8 @@ class Wikipedia:
 			for url_dictionary in disambiguation_page['disambiguation_results']
 			if url_dictionary['url'] not in already_captured_urls
 		]
-		#print(disambiguation_results)
+
 		return pages + disambiguation_results
+
+	def get_performance(self):
+		return self.function_durations.summary_data
