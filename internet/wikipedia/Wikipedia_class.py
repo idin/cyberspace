@@ -1,15 +1,20 @@
 # p
 from copy import deepcopy
 import requests
+from requests.adapters import SSLError
 import time
 import warnings
+from pandas import DataFrame
+from interaction import iterate
+import re
 
 # i
 from chronology import MeasurementSet, get_elapsed, get_now
 from abstract import Graph
 
 from .exceptions import HTTPTimeoutError, WikipediaException
-from .Page import Page
+from .Page_class import Page
+from .wikipedia_lists import WIKIPEDIA_LISTS
 
 
 class Wikipedia:
@@ -23,7 +28,7 @@ class Wikipedia:
 		:param str language: such as 'en'
 		:param str user_agent:
 		:param float rate_limit_wait_seconds: wait between requests
-		:param disk.cache_class.Cache cache:
+		:param disk.Cache.Cache cache:
 		"""
 		self._language = language
 		self._user_agent = user_agent
@@ -39,18 +44,22 @@ class Wikipedia:
 				sub_directory='request'
 			)
 
-			self.get_title_and_id = self._cache.make_cached(
-				id='wikipedia_get_title_and_id_function',
-				function=self._get_title_and_id,
-				condition_function=None,
-				sub_directory='title_and_id'
-			)
-
 		else:
 			self.request = self._request
-			self.get_title_and_id = self._get_title_and_id
 
 		self._function_durations = MeasurementSet()
+
+	def __eq__(self, other):
+		"""
+		:type other: Wikipedia
+		:rtype: bool
+		"""
+		if isinstance(other, self.__class__):
+			return self._language == other._language
+		else:
+			return False
+
+
 
 	@property
 	def function_durations(self):
@@ -93,8 +102,13 @@ class Wikipedia:
 				time.sleep(wait_time)
 
 		if format == 'json':
-			r = requests.get(self.api_url, params=parameters, headers=headers)
-			result = r.json()
+			try:
+				r = requests.get(self.api_url, params=parameters, headers=headers)
+				result = r.json()
+			except SSLError as e:
+				warnings.warn(str(e))
+				result = None
+
 		else:
 			result = requests.get(url, headers=headers)
 			# result = html.document_fromstring(r.text)
@@ -113,12 +127,14 @@ class Wikipedia:
 		"""
 		return Page(id=id, url=url, title=title, namespace=namespace, api=self, redirect=redirect)
 
+	'''
 	def _get_title_and_id(self, url, redirect):
 		try:
 			_page = self.get_page(url=url, redirect=redirect)
 			return {'id': _page['id'], 'title': _page['title'], 'url': _page['url']}
 		except Exception as e:
 			return None
+	'''
 
 	def get_page_graph(
 			self, graph=None, id=None, url=None, title=None, namespace=0, redirect=True,
@@ -188,17 +204,66 @@ class Wikipedia:
 		]
 		already_captured_urls = [page['url'] for page in pages]
 		disambiguation_pages = [page for page in pages if page['disambiguation']]
-		disambiguation_results = [
-			Page(
-				api=self, url=url_dictionary['url'], title=url_dictionary['text'],
-				disambiguation_url=disambiguation_page['url']
-			)
-			for disambiguation_page in disambiguation_pages
-			for url_dictionary in disambiguation_page['disambiguation_results']
-			if url_dictionary['url'] not in already_captured_urls
-		]
-
+		disambiguation_results = []
+		total_num_results = len(pages)
+		for disambiguation_page in disambiguation_pages:
+			for url_dictionary in disambiguation_page['disambiguation_results']:
+				if url_dictionary['url'] not in already_captured_urls and total_num_results<num_results:
+					wikipedia_url_regex_str = '^(http|https)://.+\.wikipedia.org'
+					wikipedia_url_regex = re.compile(wikipedia_url_regex_str)
+					if re.match(wikipedia_url_regex, url_dictionary['url']):
+						page = Page(
+							api=self, url=url_dictionary['url'], title=url_dictionary['text'],
+							disambiguation_url=disambiguation_page['url']
+						)
+						disambiguation_results.append(page)
+						total_num_results += 1
 		return pages + disambiguation_results
 
 	def get_performance(self):
 		return self.function_durations.summary_data
+
+	def get_wikipedia_lists(self):
+		lists = {
+			'brand': WIKIPEDIA_LISTS['brands'],
+			'company':WIKIPEDIA_LISTS['companies'],
+			'person': WIKIPEDIA_LISTS['americans']
+		}
+		extra_title = 'list of '
+
+		categories = []
+		subcategories = []
+		titles = []
+		list_page_urls = []
+		urls = []
+		for category, l in lists.items():
+			for list_page_url in iterate(l, text=category):
+				page = self.get_page(url=list_page_url)
+				subcategory = page['title']
+
+				if subcategory is not None:
+					subcategory = subcategory.replace('\\u0026', '&')
+					if extra_title.lower() in subcategory.lower():
+						subcategory = subcategory[len(extra_title):]
+				link_list = page['link_list']
+				if link_list is not None:
+					for link in link_list:
+						if link['url'] is not None:
+							if 'text' in link:
+								title = link['text']
+							else:
+								title = None
+							titles.append(title)
+							urls.append(link['url'])
+
+							categories.append(category)
+							subcategories.append(subcategory)
+							list_page_urls.append(list_page_url)
+
+		result = DataFrame({
+			'category': categories,
+			'subcategory': subcategories,
+			'list_page_url': list_page_urls,
+			'title': titles,
+			'url': urls})
+		return result

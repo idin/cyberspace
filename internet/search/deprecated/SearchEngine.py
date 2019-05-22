@@ -1,4 +1,4 @@
-from .. import Navigator
+from internet import Navigator
 from .Query import Query
 
 

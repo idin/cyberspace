@@ -2,7 +2,7 @@ from .SearchEngine import SearchEngine, Navigator
 from .Query import Query
 
 
-class Bing(SearchEngine):
+class Bing2(SearchEngine):
 	def __init__(self, navigator=None):
 		"""
 		:type navigator: Navigator
@@ -31,3 +31,4 @@ class Bing(SearchEngine):
 
 		query.store(key=results_key, precursors=['b_algo'], function=get_headers)
 		return query[results_key]
+

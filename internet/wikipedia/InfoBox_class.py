@@ -1,13 +1,17 @@
-from bs4 import BeautifulSoup, SoupStrainer
-import re
 import json
-from ...beautiful_soup_helpers import separate_row_header, parse_link
+from internet.beautiful_soup_helpers import separate_row_header, parse_link
 
 class InfoBox:
-	def __init__(self, html):
-		strainer = SoupStrainer('table', {'class': re.compile('infobox.+vcard')})
+	def __init__(self, html, extract=False):
+		#strainer = SoupStrainer('table', {'class': re.compile('infobox.+vcard')})
 		if html:
-			self._dictionary = self._parse_table(BeautifulSoup(html, 'lxml', parse_only=strainer))
+			for br in html.find_all('br'):
+				br.replace_with('\n')
+			self._dictionary = self._parse_table(html)
+			if extract:
+				html.extract()
+		else:
+			self._dictionary = {}
 
 	def __str__(self):
 		return json.dumps(self._dictionary, indent=2)

@@ -1,1 +1,0 @@
-from .Wikipedia_class import Wikipedia
