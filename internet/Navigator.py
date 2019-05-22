@@ -5,15 +5,16 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.common.by import By
 from selenium.webdriver import Chrome, Firefox
-import urllib.request
+#import urllib.request
+import requests
+from requests.adapters import SSLError
 from bs4 import BeautifulSoup
 
 from json import load as load_json
 
 import time
-from datetime import datetime
 import warnings
-from chronology import Timer
+from chronology import MeasurementSet
 
 
 class Navigator:
@@ -44,11 +45,12 @@ class Navigator:
 		self._url = None
 		self._page_source = None
 		self._parsed_html = None
-		self._get_timer = Timer()
-		self._parse_timer = Timer()
+		self._measurement_set = MeasurementSet()
 
-		self.get = self._get_timer.measure(function=self.get)
-		self.parse_html = self._parse_timer.measure(function=self._parse_html)
+		#self.get = self._measurement_set.measure(function=self._get, name='get')
+		#self.parse_html = self._measurement_set.measure(function=self._parse_html, name='parse_html')
+		self.get = self._get
+		self.parse_html = self._parse_html
 
 	def __del__(self):
 		self.driver.quit()
@@ -81,8 +83,11 @@ class Navigator:
 		headers = headers or {
 			'user-agent': self._user_agent
 		}
+		request = requests.get(url=url, headers={'User-Agent': self._user_agent})
+		'''
 		request = urllib.request.Request(url)
-		for key, value in headers.items():
+		
+		#for key, value in headers.items():
 			request.add_header(key=key, val=value)
 
 		if json:
@@ -92,6 +97,14 @@ class Navigator:
 			with urllib.request.urlopen(request, timeout=self._timeout) as response:
 				html = response #.read().decode(encoding)
 			return html
+		'''
+		if format == 'json':
+			try:
+				r = requests.get(url, params=parameters, headers=headers)
+				result = r.json()
+			except SSLError as e:
+				warnings.warn(str(e))
+				result = None
 
 	def _get(
 			self, url, request_method=None, element_id=None, get_json_back=False,
