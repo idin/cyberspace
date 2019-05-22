@@ -5,3 +5,4 @@ from .get_lists import get_lists
 from .clean_html_text_function import clean_html_text
 from .read_table_function import read_table
 from .get_url_and_get_anchor_functions import get_url, get_anchor
+from .get_paragraphs_by_tokens_function import get_paragraphs_by_tokens
