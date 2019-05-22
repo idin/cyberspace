@@ -10,6 +10,16 @@ def parse_link(link, base=None):
 		href = link['href']
 		if href.startswith('http') or base is None or href.startswith('#'):
 			result['url'] = href
+		elif href.startswith('//'):
+			if base is None:
+				result['url'] = 'http' + href
+			else:
+				if base.startswith('https'):
+					result['url'] = 'https' + href
+				elif base.startswith('http'):
+					result['url'] = 'http' + href
+				else:
+					result['url'] = href
 		else:
 			result['url'] = (base + href)
 	except KeyError:
