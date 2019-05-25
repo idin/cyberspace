@@ -14,7 +14,7 @@ class InfoBox:
 			self._dictionary = {}
 
 	def __str__(self):
-		return json.dumps(self._dictionary, indent=2)
+		return '\n'.join([f'{k}: {v}' for k, v in self._dictionary.items()])
 
 	def __repr__(self):
 		return 'InfoBox:\n'+str(self)
