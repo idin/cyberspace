@@ -2,15 +2,18 @@ from .exceptions import PageError, RedirectError, ODD_ERROR_MESSAGE
 from .InfoBox_class import InfoBox
 from .get_wikipedia_id import get_wikipedia_id, get_page_title, get_page_language, get_page_namespace
 from .Page_helper_functions import *
-from ..beautiful_soup_helpers.get_paragraphs_by_tokens_function import get_paragraphs_by_tokens
 from .is_wikipedia_page_url_function import is_wikipedia_page_url
 from .is_wikipedia_page_url_function import is_mobile_wikipedia_page_url
 from .is_wikipedia_page_url_function import convert_mobile_wikipedia_page_url_to_normal_page
+
+from ..beautiful_soup_helpers import get_paragraphs_and_tokens
+from ..beautiful_soup_helpers import read_table
 
 
 import re
 from pensieve import Pensieve
 from slytherin.collections import remove_list_duplicates, flatten
+from ravenclaw.wrangling import standardize_columns
 from interaction import ProgressBar
 from internet.beautiful_soup_helpers import get_lists, parse_link, find_links
 from linguistics import tokenize
@@ -67,9 +70,9 @@ class Page:
 	def __str__(self):
 		if 'url' in self._pensieve:
 			url = self._pensieve['url']
-			return f'{self.title}: {url}'
+			return f'{self.title}: {url} '
 		else:
-			return f'{self.title}: {self.id}'
+			return f'{self.title}: {self.id} '
 
 	def __repr__(self):
 		return str(self)
@@ -142,7 +145,7 @@ class Page:
 	def get_children(self, echo=1):
 		link_lists = self['link_list']
 		if link_lists:
-			urls = remove_list_duplicates([link['url'] for link in flatten(link_lists)])
+			urls = remove_list_duplicates([link.url for link in flatten(link_lists)])
 			wikipedia_urls = [url for url in urls if re.match('^https://.+\.wikipedia.org/', url)]
 			non_php_urls = [url for url in wikipedia_urls if '/index.php?' not in url]
 
@@ -324,38 +327,6 @@ class Page:
 			function=lambda x: x[:x.find('/wiki/')]
 		)
 
-		'''
-		self._pensieve.store(
-			key='separated_boxes', precursors=['url_response'], evaluate=False,
-			function=lambda x: separate_body_from_navigation_and_info_box(x)
-		)
-
-		self._pensieve.store(
-			key='body', precursors=['separated_boxes'], evaluate=False,
-			function=lambda x: x['body']
-		)
-
-		self._pensieve.store(
-			key='info_box', precursors=['separated_boxes'], evaluate=False,
-			function=lambda x: InfoBox(html=x['info_box'])
-		)
-
-		self._pensieve.store(
-			key='vertical_navigation_box', precursors=['separated_boxes'], evaluate=False,
-			function=lambda x: x['vertical_navigation_box']
-		)
-
-		self._pensieve.store(
-			key='navigation_boxes', precursors=['separated_boxes'], evaluate=False,
-			function=lambda x: x['navigation_boxes']
-		)
-		
-		self._pensieve.store(
-			key='category_box', precursors=['separated_boxes'], evaluate=False,
-			function=lambda x: x['categories']
-		)
-		'''
-
 		# main parts
 		def _add_see_also_flag(x):
 			x = re.sub(
@@ -402,7 +373,7 @@ class Page:
 
 		self._pensieve.store(
 			key='paragraphs_and_tokens', precursors=['body'], evaluate=False,
-			function=lambda x: get_paragraphs_by_tokens(soup=x, num_tokens=100)
+			function=lambda x: get_paragraphs_and_tokens(soup=x, num_tokens=100)
 		)
 
 		self._pensieve.store(
@@ -414,7 +385,6 @@ class Page:
 			key='tokens', precursors=['paragraphs_and_tokens'], evaluate=False,
 			function=lambda x: x['tokens']
 		)
-
 
 
 		self._pensieve.store(
@@ -441,6 +411,16 @@ class Page:
 			function=lambda x: get_disambiguation_results(
 				disambiguation=x['disambiguation'], html=x['body'], base_url=x['base_url']
 			)
+		)
+
+		self._pensieve.store(
+			key='tables',
+			precursors=['body', 'base_url'],
+			evaluate=False,
+			function=lambda x: [
+				standardize_columns(data=read_table(table=table, parse_links=True, base_url=x['base_url']))
+				for table in x['body'].find_all('table', attrs={'class': 'wikitable'})
+			]
 		)
 
 		def _get_anchors_and_links(html, base_url):
@@ -479,11 +459,11 @@ class Page:
 				for item in ordered_list.find_all('li'):
 					if item.find('a'):
 						link = parse_link(item, base=base_url)
-						if link is not None:
-							if link['url'] == 'http://SEEALSO':
+						if isinstance(link, Link):
+							if link.url == 'http://SEEALSO':
 								break
-							if is_good_link(link['url']):  # and ':' not in link['url']:
-								ordered_list_links[link['url']] = link
+							if is_good_link(link.url):  # and ':' not in link['url']:
+								ordered_list_links[link.url] = link
 				else:
 					continue
 				break
@@ -491,12 +471,12 @@ class Page:
 			for item in html.find_all('li'):
 				if item.find('a'):
 					link = parse_link(item, base=base_url)
-					if link is not None:
-						if link['url'] == 'http://SEEALSO':
+					if isinstance(link, Link):
+						if link.url == 'http://SEEALSO':
 							break
-						if is_good_link(link['url']):  # and ':' not in link['url']:
-							if link['url'] not in table_links and link['url'] not in ordered_list_links:
-								list_links[link['url']] = link
+						if is_good_link(link.url):  # and ':' not in link['url']:
+							if link.url not in table_links and link.url not in ordered_list_links:
+								list_links[link.url] = link
 
 			return {
 				'list_link_and_anchors': list(list_links.values()),
@@ -578,7 +558,7 @@ class Page:
 
 		self._pensieve.store(
 			key='summary', precursors=['id', 'title'], evaluate=False,
-			function=lambda x: get_page_summary(id=x['id'], title=x['title'])
+			function=lambda x: get_page_summary(page=self, id=x['id'], title=x['title'])
 		)
 
 		self._pensieve.store(

@@ -52,7 +52,7 @@ class BingSearchResults(SearchResults):
 			key='links', precursors=['parsed_html'],
 			function=lambda x: [
 				link for link in find_links(element=x, base=None)
-				if link['url'].startswith('http://') or link['url'].startswith('https://')
+				if link.url.startswith('http://') or link.url.startswith('https://')
 			],
 			evaluate=False
 		)
@@ -81,17 +81,17 @@ class YahooSearchResults(SearchResults):
 			key='links', precursors=['parsed_html'],
 			function=lambda x: [
 				link for link in find_links(element=x, base=None)
-				if link['url'].startswith('http://') or link['url'].startswith('https://')
+				if link.url.startswith('http://') or link.url.startswith('https://')
 			],
 			evaluate=False
 		)
 
 		self._pensieve.store(
 			key='wikipedia_links', precursors=['links'],
-			function=lambda x: [link for link in x if is_wikipedia_page_url(url=link['url'])]
+			function=lambda x: [link for link in x if is_wikipedia_page_url(url=link.url)]
 		)
 
 		self._pensieve.store(
 			key='yahoo_finance_search_urls', precursors=['links'],
-			function=lambda x: [link['url'] for link in x if is_yahoo_finance_search_url(url=link['url'])]
+			function=lambda x: [link.url for link in x if is_yahoo_finance_search_url(url=link.url)]
 		)

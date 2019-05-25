@@ -1,4 +1,4 @@
-from ..beautiful_soup_helpers import find_links, clone_beautiful_soup_tag
+from ..beautiful_soup_helpers import find_links, clone_beautiful_soup_tag, Link
 
 from collections import Counter
 from bs4 import BeautifulSoup
@@ -32,7 +32,7 @@ def get_disambiguation_results(disambiguation, html, base_url):
 		if printfooter:
 			printfooter.extract()
 		links = find_links(element=content, base=base_url)
-		return [link for link in links if '/index.php?' not in link['url']]
+		return [link for link in links if '/index.php?' not in link.url]
 	else:
 		return []
 
@@ -117,7 +117,7 @@ def _depricated_separate_body_from_navigation_and_info_box(url_response):
 
 def get_categories(category_links):
 	if isinstance(category_links, list):
-		urls = [link['url'] for link in category_links if 'url' in link]
+		urls = [link.url for link in category_links if isinstance(link, Link)]
 		category_sign = '/wiki/Category:'
 		category_urls = [url for url in urls if category_sign in url]
 		return [url[url.find(category_sign) + len(category_sign):] for url in category_urls]
@@ -148,10 +148,12 @@ def get_vertical_navigation_box(x, extract=False):
 	return result
 
 def get_navigation_boxes(x, extract=False):
-	result = x.find_all(name='div', attrs={'role': 'navigation'})
-	if result is not None:
+	boxes = x.find_all(name='div', attrs={'role': 'navigation'})
+	result = []
+	if boxes is not None:
 		if extract:
-			result.extract()
+			for box in boxes:
+				result.append(box.extract())
 	return result
 
 def get_category_box(x, extract=False):
