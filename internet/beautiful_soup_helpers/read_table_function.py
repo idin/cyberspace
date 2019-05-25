@@ -3,20 +3,30 @@ import copy
 from collections import Counter
 
 from .clone_beautiful_soup_tag import clone_beautiful_soup_tag
-from .clean_html_text_function import clean_html_text
+from .clean_html_text import clean_html_text
+from .find_links import find_links
 
 def get_table_shape(table):
 	num_columns = 0
 	num_header_rows = 0
 	num_rows = 0
 
+	is_header = True
 	for row in table.find_all("tr"):
 		col_tags = row.find_all(["td", "th"])
 		if len(col_tags) > 0:
-			if row.find('th'):
-				num_header_rows += 1
+
+			if is_header:
+				if row.find('td') is None:
+					num_header_rows += 1
+
+				else:
+					is_header = False
+					num_rows += 1
+
 			else:
 				num_rows += 1
+
 			if len(col_tags) > num_columns:
 				num_columns = len(col_tags)
 	return {'num_header_rows': num_header_rows, 'num_rows': num_rows, 'num_columns': num_columns}
@@ -27,7 +37,7 @@ def join_html_texts(texts):
 	return clean_html_text(string)
 
 
-def read_table(table, text_only=False):
+def read_table(table, parse_links=False, base_url=None):
 	table = clone_beautiful_soup_tag(table)
 	for elem in table.find_all(["br"]):
 		elem.replace_with(elem.text + "\n")
@@ -45,8 +55,10 @@ def read_table(table, text_only=False):
 	row_counter = 0
 	header_row_counter = 0
 
+	is_header = True
 	for row in table.find_all("tr"):
-		is_header = row.find('th') is not None
+		if is_header:
+			is_header = row.find('td') is None
 
 		# Skip row if it's blank
 		if len(row.find_all(["td", "th"])) > 0:
@@ -88,9 +100,15 @@ def read_table(table, text_only=False):
 
 				# Get cell contents
 				if is_header:
-					cell_data = clean_html_text(col, replace_images_with_text=True)
-				elif text_only:
-					cell_data = clean_html_text(col, replace_images_with_text=False)
+					cell_data = clean_html_text(col, replace_images=True)
+				elif parse_links:
+					links = find_links(element=col, base=base_url)
+					if len(links) == 0:
+						cell_data = None
+					elif len(links) == 1:
+						cell_data = links[0]
+					else:
+						cell_data = links
 				else:
 					cell_data = col
 
@@ -107,7 +125,13 @@ def read_table(table, text_only=False):
 
 				if is_header:
 					for k in range(num_columns_in_cell):
-						header.iat[header_row_counter, col_counter + k] = cell_data
+						try:
+							header.iat[header_row_counter, col_counter + k] = cell_data
+						except:
+							display(header)
+							print(table_shape)
+							print({'header_row_counter': header_row_counter, 'col_counter': col_counter, 'k': k, 'cell_data': cell_data})
+							raise
 				else:
 					for i in range(num_rows_in_cell):
 						for k in range(num_columns_in_cell):
