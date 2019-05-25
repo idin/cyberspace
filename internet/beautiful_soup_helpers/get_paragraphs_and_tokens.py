@@ -6,6 +6,7 @@ def get_paragraphs_and_tokens(soup, num_tokens=100, min_length=2):
 	"""
 	:param BeautifulSoup soup: BeautifulSoup
 	:param int num_tokens: number of tokens required to finish the job
+	:param int min_length: minimum length for a token to be considered (anything shorter will be ignored)
 	:rtype: list[str]
 	"""
 	_paragraphs = soup.find_all('p')
