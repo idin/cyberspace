@@ -1,4 +1,4 @@
-from .SearchResults_class import BingSearchResults, YahooSearchResults
+from .SearchResults import BingSearchResults, YahooSearchResults
 
 from chronology import MeasurementSet, get_elapsed, get_now
 

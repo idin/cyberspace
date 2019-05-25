@@ -1,10 +1,10 @@
 from .exceptions import PageError, RedirectError, ODD_ERROR_MESSAGE
-from .InfoBox_class import InfoBox
+from .InfoBox import InfoBox
 from .get_wikipedia_id import get_wikipedia_id, get_page_title, get_page_language, get_page_namespace
-from .Page_helper_functions import *
-from .is_wikipedia_page_url_function import is_wikipedia_page_url
-from .is_wikipedia_page_url_function import is_mobile_wikipedia_page_url
-from .is_wikipedia_page_url_function import convert_mobile_wikipedia_page_url_to_normal_page
+from .Page_helpers import *
+from .is_wikipedia_page_url import is_wikipedia_page_url
+from .is_wikipedia_page_url import is_mobile_wikipedia_page_url
+from .is_wikipedia_page_url import convert_mobile_wikipedia_page_url_to_normal_page
 
 from ..beautiful_soup_helpers import get_paragraphs_and_tokens
 from ..beautiful_soup_helpers import read_table

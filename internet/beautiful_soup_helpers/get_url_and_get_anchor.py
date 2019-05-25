@@ -1,5 +1,3 @@
-from .clone_beautiful_soup_tag import clone_beautiful_soup_tag
-
 def get_url(element, base=None):
 	try:
 		href = element.attrs['href']
@@ -26,23 +24,18 @@ def get_anchor(element):
 		return None
 
 
-def get_url_lists(element, base=None):
-	result = []
-	lists = element.get_all('ul')
-
 def break_lists(element):
 
-	def _recursive_find(x, result):
+	def _recursive_find(x, _result):
 		lists = x.find_all('ul')
 		if lists is None:
 			final_list = x.extract()
 			items = final_list.find_all('li')
-			result.append(items)
+			_result.append(items)
 		else:
 			print(len(lists))
 			for x in lists:
-				_recursive_find(x, result)
+				_recursive_find(x, _result)
 	result = []
 	_recursive_find(element, [])
 	return result
-

@@ -1,1 +1,1 @@
-from .SearchEngine_class import SearchEngine
+from .SearchEngine import SearchEngine
