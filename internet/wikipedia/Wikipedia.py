@@ -15,6 +15,7 @@ from abstract import Graph
 from .exceptions import HTTPTimeoutError, WikipediaException
 from .Page_class import Page
 from .wikipedia_lists import WIKIPEDIA_LISTS
+from .get_special_data import get_special_data
 
 
 class Wikipedia:
@@ -118,7 +119,7 @@ class Wikipedia:
 			self._rate_limit_last_call = get_now()
 		return result
 
-	def get_page(self, id=None, url=None, title=None, namespace=0, redirect=True):
+	def get_page(self, url=None, id=None, title=None, namespace=0, redirect=True):
 		"""
 		:type id: int or str or NoneType
 		:type url: str or NoneType
@@ -267,3 +268,6 @@ class Wikipedia:
 			'title': titles,
 			'url': urls})
 		return result
+
+	def get_data(self, name, echo=1):
+		return get_special_data(wikipedia=self, name=name, echo=echo)
