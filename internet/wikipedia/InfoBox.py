@@ -1,5 +1,6 @@
 import json
-from internet.beautiful_soup_helpers import separate_row_header, parse_link
+from silverware import separate_row_header, parse_link
+from linguistics import tokenize
 
 class InfoBox:
 	def __init__(self, html, extract=False):
@@ -41,15 +42,16 @@ class InfoBox:
 		result = {}
 		title_number = 1
 		unknown_header_number = 1
+
 		for row in table.find_all('tr'):
 			header, rest = separate_row_header(row)
 
-			texts = [text.replace(u'\xa0', u' ') for text in rest.text.split('\n') if text != '']
+			texts = ['_'.join(tokenize(text)) for text in rest.text.split('\n') if text != '']
 			links = [parse_link(link) for link in rest.find_all('a')]
 
 			if len(texts) > 0 or len(links) > 0:
 				if header:
-					header_text = header.text.replace(u'\xa0', u' ')
+					header_text = '_'.join(tokenize(header.text))
 				else:
 					header_text = f'unknown_row_{unknown_header_number}'
 					unknown_header_number += 1
@@ -60,7 +62,7 @@ class InfoBox:
 				else:
 					result[header_text] = {'texts': texts, 'links': links}
 			elif header:
-				result[f'title_{title_number}'] = header.text.replace(u'\xa0', u' ')
+				result[f'title_{title_number}'] = '_'.join(tokenize(header.text))
 				title_number += 1
 
 		return result

@@ -6,17 +6,15 @@ from .is_wikipedia_page_url import is_wikipedia_page_url
 from .is_wikipedia_page_url import is_mobile_wikipedia_page_url
 from .is_wikipedia_page_url import convert_mobile_wikipedia_page_url_to_normal_page
 
-from ..beautiful_soup_helpers import get_paragraphs_and_tokens
-from ..beautiful_soup_helpers import read_table
-
-
 import re
 from pensieve import Pensieve
 from slytherin.collections import remove_list_duplicates, flatten
 from ravenclaw.wrangling import standardize_columns
 from interaction import ProgressBar
-from internet.beautiful_soup_helpers import get_lists, parse_link, find_links
 from linguistics import tokenize
+from silverware import Spoon
+from bs4 import BeautifulSoup
+from pandas import DataFrame
 
 
 class Page:
@@ -220,7 +218,7 @@ class Page:
 		# then the page must be a disambiguation page
 		elif 'pageprops' in page:
 			return {
-				'id':int(id), 'title': title, 'page': page, 'redirected_from': redirected_from,
+				'id': int(id), 'title': title, 'page': page, 'redirected_from': redirected_from,
 				'full_url': full_url, 'language': language, 'namespace': namespace, 'disambiguation': True
 			}
 
@@ -316,14 +314,21 @@ class Page:
 			)
 		)
 		self._parse_search_results(
-			keys=['id', 'title', 'page', 'redirected_from', 'language', 'namespace', 'full_url', 'disambiguation']
+			keys=[
+				'id', 'title', 'page', 'redirected_from', 'language',
+				'namespace', 'full_url', 'disambiguation'
+			]
 		)
-		self._pensieve.store(key='url', precursors=['page'], function=lambda x: x['fullurl'], evaluate=False)
+		self._pensieve.store(
+			key='url', precursors=['page'],
+			function=lambda x: x['fullurl'], evaluate=False
+		)
 		self._get_url_response()
 
 	def _load_the_rest(self):
 		self._pensieve.store(
-			key='base_url', precursors=['url'], evaluate=False, materialize=False,
+			key='base_url', precursors=['url'],
+			evaluate=False, materialize=False,
 			function=lambda x: x[:x.find('/wiki/')]
 		)
 
@@ -350,6 +355,26 @@ class Page:
 		)
 
 		self._pensieve.store(
+			key='headers', precursors=['body'], evaluate=False,
+			function=lambda x: x.find_all(['h1', 'h2', 'h3'])
+		)
+
+		def _get_header_tokens(headers):
+			tokens = []
+			for header in headers:
+				text = header.text
+				if text == 'SEEALSO':
+					break
+				text = text[:-6] if text.endswith('[edit]') else text
+				tokens += tokenize(text)
+			return tokens
+
+		self._pensieve.store(
+			key='header_tokens', precursors=['headers'], evaluate=False,
+			function=_get_header_tokens
+		)
+
+		self._pensieve.store(
 			key='info_box', precursors=['body'], evaluate=False,
 			function=lambda x: InfoBox(x.find(name='table', attrs={'class': 'infobox'}), extract=True)
 		)
@@ -372,24 +397,33 @@ class Page:
 		# end of main parts
 
 		self._pensieve.store(
-			key='paragraphs_and_tokens', precursors=['body'], evaluate=False,
-			function=lambda x: get_paragraphs_and_tokens(soup=x, num_tokens=100)
+			key='paragraphs', precursors=['body'], evaluate=False,
+			function=lambda x: get_main_paragraphs(body=x)
 		)
 
 		self._pensieve.store(
-			key='paragraphs', precursors=['paragraphs_and_tokens'], evaluate=False,
+			key='paragraph_statistics', precursors=['paragraphs'], evaluate=False,
+			function=lambda x: get_paragraph_statistics(paragraphs=x)
+		)
+
+		self._pensieve.store(
+			key='token_paragraphs_and_tokens', precursors=['paragraphs'], evaluate=False,
+			function=lambda x: get_tokens_in_paragraphs(paragraphs=x, num_tokens=100)
+		)
+
+		self._pensieve.store(
+			key='token_paragraphs', precursors=['token_paragraphs_and_tokens'], evaluate=False,
 			function=lambda x: x['paragraphs']
 		)
 
 		self._pensieve.store(
-			key='tokens', precursors=['paragraphs_and_tokens'], evaluate=False,
+			key='tokens', precursors=['token_paragraphs_and_tokens'], evaluate=False,
 			function=lambda x: x['tokens']
 		)
 
-
 		self._pensieve.store(
 			key='category_links', precursors=['category_box', 'base_url'], evaluate=False,
-			function=lambda x: find_links(element=x['category_box'], base=x['base_url'])
+			function=lambda x: Spoon.find_links(element=x['category_box'], base_url=x['base_url'])
 		)
 
 		self._pensieve.store(
@@ -398,9 +432,11 @@ class Page:
 		)
 
 		self._pensieve.store(
-			key='signature', precursors=['categories', 'info_box', 'tokens'], evaluate=False,
+			key='signature', precursors=['categories', 'info_box', 'tokens', 'header_tokens', 'paragraph_statistics'],
+			evaluate=False,
 			function=lambda x: get_page_signature(
-				tokens=x['tokens'], info_box=x['info_box'], categories=x['categories']
+				tokens=x['tokens'], info_box=x['info_box'], categories=x['categories'],
+				header_tokens=x['header_tokens'], paragraph_statistics=x['paragraph_statistics']
 			)
 		)
 
@@ -418,74 +454,23 @@ class Page:
 			precursors=['body', 'base_url'],
 			evaluate=False,
 			function=lambda x: [
-				standardize_columns(data=read_table(table=table, parse_links=True, base_url=x['base_url']))
-				for table in x['body'].find_all('table', attrs={'class': 'wikitable'})
+				standardize_columns(data=table)
+				for table in Spoon.filter(
+					soup=x['body'], name='table', attributes={'class': 'wikitable'}
+				).read_tables(base_url=x['base_url'], parse_links=True)
 			]
 		)
 
-		def _get_anchors_and_links(html, base_url):
-
-			def is_good_link(link):
-				unacceptable = [
-					'/w/index.php?', '/wiki/Special:', '/wiki/Help:',
-					'/wiki/Wikipedia:', 'https://foundation.wikimedia.org',
-					'/wiki/Talk:', '/wiki/Portal:', '/shop.wikimedia.org',
-					'www.mediawiki.org', '/wiki/Main_Page', 'wikimediafoundation.org',
-					'/wiki/Template:', '/wiki/Template_talk:'
-				]
-				for x in unacceptable:
-					if x in link:
-						return False
-				return True
-
-			table_links = {}
-			list_links = {}
-			ordered_list_links = {}
-
-			for table in html.find_all('table'):
-				for item in table.find_all('li'):
-					if table.find_all('a'):
-						link = parse_link(item, base=base_url)
-						if link is not None:
-							if link['url'] == 'http://SEEALSO':
-								break  # out of both loops
-							if is_good_link(link['url']):  # and ':' not in link['url']:
-								table_links[link['url']] = link
-				else:
-					continue
-				break
-
-			for ordered_list in html.find_all('ol'):
-				for item in ordered_list.find_all('li'):
-					if item.find('a'):
-						link = parse_link(item, base=base_url)
-						if isinstance(link, Link):
-							if link.url == 'http://SEEALSO':
-								break
-							if is_good_link(link.url):  # and ':' not in link['url']:
-								ordered_list_links[link.url] = link
-				else:
-					continue
-				break
-
-			for item in html.find_all('li'):
-				if item.find('a'):
-					link = parse_link(item, base=base_url)
-					if isinstance(link, Link):
-						if link.url == 'http://SEEALSO':
-							break
-						if is_good_link(link.url):  # and ':' not in link['url']:
-							if link.url not in table_links and link.url not in ordered_list_links:
-								list_links[link.url] = link
-
-			return {
-				'list_link_and_anchors': list(list_links.values()),
-				'table_links_and_anchors':list(table_links.values())
-			}
+		self._pensieve.store(
+			key='table_links',
+			precursors=['tables'],
+			evaluate=False,
+			function=find_main_links_in_tables
+		)
 
 		self._pensieve.store(
 			key='link_and_anchors', precursors=['body', 'base_url'], evaluate=False,
-			function=lambda x: _get_anchors_and_links(html=x['body'], base_url=x['base_url'])
+			function=lambda x: get_anchors_and_links(soup=x['body'], base_url=x['base_url'])
 		)
 
 		self._pensieve.store(
@@ -495,23 +480,25 @@ class Page:
 
 		self._pensieve.store(
 			key='nested_link_and_anchor_lists', precursors=['body', 'base_url'], evaluate=False,
-			function=lambda x: get_lists(element=x['body'], links_only=True, base=x['base_url'])
+			function=lambda x: Spoon.get_lists(element=x['body'], links_only=True, base_url=x['base_url'])
 		)
 
-		# ANCHORS IN A PAGE
+		# 	LINKS IN A PAGE
+		def _remove_anchors(link_lists):
+			if isinstance(link_lists, list):
+				return [_remove_anchors(x) for x in link_lists if x is not None]
+			elif isinstance(link_lists, Link):
+				if link_lists.url.startswith('#'):
+					return None
+				else:
+					return link_lists
+
+		# 	LINKS IN A PAGE
 		def _remove_nonanchors(link_lists):
 			if isinstance(link_lists, list):
-				result = [_remove_nonanchors(ll) for ll in link_lists if ll]
-				result = [x for x in result if x is not None]
-				result = [x for x in result if len(x) > 0 or not isinstance(x, list)]
-				if len(result) > 1:
-					return result
-				elif len(result) == 1:
-					return result[0]
-				else:
-					return None
-			elif isinstance(link_lists, dict):
-				if not link_lists['url'].startswith('#'):
+				return [_remove_anchors(x) for x in link_lists if x is not None]
+			elif isinstance(link_lists, Link):
+				if not link_lists.url.startswith('#'):
 					return None
 				else:
 					return link_lists
@@ -526,25 +513,7 @@ class Page:
 			function=_remove_nonanchors
 		)
 
-		# 	LINKS IN A PAGE
-		def _remove_anchors(link_lists):
-			if isinstance(link_lists, list):
-				result = [_remove_anchors(ll) for ll in link_lists if ll]
-				result = [x for x in result if x is not None]
-				result = [x for x in result if len(x) > 0 or not isinstance(x, list)]
-				if len(result) > 1:
-					return result
-				elif len(result) == 1:
-					return result[0]
-				else:
-					return None
-			elif isinstance(link_lists, dict):
-				if 'url' not in link_lists:
-					print(link_lists)
-				if link_lists['url'].startswith('#'):
-					return None
-				else:
-					return link_lists
+
 
 		self._pensieve.store(
 			key='nested_link_lists', precursors=['nested_link_and_anchor_lists'], evaluate=False,
@@ -598,6 +567,16 @@ class Page:
 		content_request = self.request(parameters=content_parameters, format='json')
 		return content_request['query']['pages'][id]
 
+	@property
+	def body(self):
+		"""
+		:rtype: BeautifulSoup
+		"""
+		return self['body']
 
-
-
+	@property
+	def tables(self):
+		"""
+		:rtype: list[DataFrame]
+		"""
+		return self['tables']

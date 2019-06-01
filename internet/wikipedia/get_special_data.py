@@ -1,6 +1,6 @@
 from pensieve import Pensieve
 from interaction import ProgressBar
-from ..beautiful_soup_helpers import Link
+from silverware import Link
 
 
 def get_special_data(wikipedia, name, echo=1):
