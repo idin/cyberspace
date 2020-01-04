@@ -1,6 +1,6 @@
 from .SearchResults import BingSearchResults, YahooSearchResults
 
-from chronology import MeasurementSet, get_elapsed, get_now
+from chronometry import MeasurementSet, get_elapsed, get_now
 
 import requests
 from requests.utils import quote

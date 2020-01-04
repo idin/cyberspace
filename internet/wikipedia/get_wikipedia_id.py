@@ -21,14 +21,22 @@ def get_page_title(url_response):
 	:type element: Tag
 	:rtype: int
 	"""
-	keyword = '"wgTitle"'
-	text = url_response
+	keyword = '"wgTitle":'
+	text = url_response.replace('\\u0026', 'and')
 	if keyword in text:
 		beginning = text[text.find(keyword) + len(keyword):]
-		ending = beginning[:beginning.find(',')]
-		results = re.findall('".+"', ending)
+		ending = beginning[:beginning.find('",')]
+		results = re.findall('".+', ending)
 		if len(results) > 0:
-			return results[0][1:-1]
+			return results[0][1:]
+		else: # try regex:
+			results = re.findall('"wgTitle"\s*?:\s*?".*?"', text)
+			if len(results) > 0:
+				return results[0][11:-1]
+			else:
+				return 'No Title'
+	else:
+		return 'No Title'
 
 def get_page_language(url_response):
 	"""

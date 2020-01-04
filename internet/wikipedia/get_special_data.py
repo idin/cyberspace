@@ -1,5 +1,5 @@
 from pensieve import Pensieve
-from interaction import ProgressBar
+from chronometry.progress import ProgressBar
 from silverware import Link
 
 

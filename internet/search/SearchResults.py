@@ -1,5 +1,5 @@
-from internet.beautiful_soup_helpers import find_links
-from internet.wikipedia import is_wikipedia_page_url
+from silverware import find_links
+from ..wikipedia import is_wikipedia_page_url
 from .is_yahoo_finance_search_url_function import is_yahoo_finance_search_url
 
 from bs4 import BeautifulSoup

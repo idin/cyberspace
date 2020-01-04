@@ -10,50 +10,113 @@ import re
 from pensieve import Pensieve
 from slytherin.collections import remove_list_duplicates, flatten
 from ravenclaw.wrangling import standardize_columns
-from interaction import ProgressBar
-from linguistics import tokenize
+from chronometry.progress import ProgressBar
+
 from silverware import Spoon
 from bs4 import BeautifulSoup
 from pandas import DataFrame
+import warnings
 
 
 class Page:
-	def __init__(self, api=None, id=None, url=None, title=None, namespace=None, redirect=True, disambiguation_url=None):
-		self._api = api
-		self._pensieve = Pensieve(safe=False, function_durations=self.api.function_durations, warn_unsafe=False)
-		if id or title or url:
+	def __init__(
+			self, wikipedia, id=None, url=None, title=None, namespace=None, redirect=True, disambiguation_url=None,
+			ignore_error=False
+	):
+		self._wikipedia = wikipedia
+		self._id = id
+		self._url = url
+		self._title = title
+		self._ignore_error = ignore_error
+		self._setup_pensieve()
+		self.pensieve['namespace'] = namespace
+		self.pensieve['redirect'] = redirect
+		self.pensieve['disambiguation_url'] = disambiguation_url
+		self._load_primary()
+
+		try:
+			self._load_the_rest()
+		except Exception as e:
+			warnings.warn(f'failed to load the rest id: "{self._id}", url: "{self._url}", title: "{self._title}"')
+			if not ignore_error:
+				raise e
+
+	_STATE_ATTRIBUTES_ = ['_id', '_url', '_title', '_ignore_error']
+
+	def __getstate__(self):
+		state = {key: getattr(self, key) for key in self._STATE_ATTRIBUTES_}
+		state['_pensieve'] = self._pensieve.get_contents()
+		return state
+
+	def __setstate__(self, state):
+		for key, value in state.items():
+			setattr(self, key, value)
+		self._pensieve = state['_pensieve']
+		self._load_primary()
+		try:
+			self._load_the_rest()
+		except Exception as e:
+			warnings.warn(f'failed to load the rest id: "{self._id}", url: "{self._url}", title: "{self._title}"')
+			if not self._ignore_error:
+				raise e
+
+	def __hashkey__(self):
+		return (self.__class__.__name__, tuple(getattr(self, name) for name in self._STATE_ATTRIBUTES_))
+
+	def _setup_pensieve(self):
+		self._pensieve = Pensieve(
+			safe=False, function_durations=self.wikipedia.function_durations, warn_unsafe=False, hide_ignored=False
+		)
+
+	def _load_primary(self):
+		if self._id or self._title or self._url:
 			pass
 		else:
 			raise ValueError('Either id or title or url should be given!')
+		if self._id:
+			self.pensieve['original_id'] = self._id
+			try:
+				self._load_from_id()
+			except Exception as e:
+				warnings.warn(f'failed to load from id: "{self._id}"')
+				if not self._ignore_error:
+					raise e
 
-		self._pensieve['namespace'] = namespace
-		self._pensieve['redirect'] = redirect
-		self._pensieve['disambiguation_url'] = disambiguation_url
+		elif self._url:
+			if is_wikipedia_page_url(url=self._url):
+				if is_mobile_wikipedia_page_url(url=self._url):
+					url = convert_mobile_wikipedia_page_url_to_normal_page(url=self._url)
+				else:
+					url = self._url
 
-		if id:
-			self._pensieve['original_id'] = id
-			self._load_from_id()
-
-		elif url:
-			if is_wikipedia_page_url(url=url):
-				if is_mobile_wikipedia_page_url(url=url):
-					url = convert_mobile_wikipedia_page_url_to_normal_page(url=url)
-				self._pensieve['url'] = url
-				self._load_from_url()
+				self.pensieve['url'] = url
+				try:
+					self._load_from_url()
+				except Exception as e:
+					warnings.warn(f'failed to load from url: "{self._url}"')
+					if not self._ignore_error:
+						raise e
 			else:
-				raise ValueError(f'{url} does not match the wikipedia page pattern!')
+				raise ValueError(f'{self._url} does not match the wikipedia page pattern!')
 
-		elif title:
-			self._pensieve['original_title'] = title
-			self._load_from_title()
-		self._load_the_rest()
+		elif self._title:
+			self.pensieve['original_title'] = self._title
+			try:
+				self._load_from_title()
+			except Exception as e:
+				warnings.warn(f'failed to load from title: "{self._title}"')
+				if not self._ignore_error:
+					raise e
 
-	def __getstate__(self):
-		return self._pensieve
-
-	def __setstate__(self, state):
-		self._pensieve = state
-		self._api = None
+	@property
+	def wikipedia(self):
+		"""
+		:rtype: .Wikipedia_class.Wikipedia
+		"""
+		if self._wikipedia is None:
+			raise AttributeError('Wikipedia API is missing!')
+		else:
+			return self._wikipedia
 
 	def __eq__(self, other):
 		"""
@@ -66,8 +129,8 @@ class Page:
 			return False
 
 	def __str__(self):
-		if 'url' in self._pensieve:
-			url = self._pensieve['url']
+		if 'url' in self.pensieve:
+			url = self.pensieve['url']
 			return f'{self.title}: {url} '
 		else:
 			return f'{self.title}: {self.id} '
@@ -79,45 +142,37 @@ class Page:
 		return self.pensieve[item]
 
 	def __graph__(self):
-		return self._pensieve.__graph__()
+		return self.pensieve.__graph__()
 
 	@property
 	def title(self):
 		"""
 		:rtype: str
 		"""
-		if 'title' in self._pensieve:
-			return self._pensieve['title']
+		if 'title' in self.pensieve:
+			return self.pensieve['title']
 		else:
-			return self._pensieve['original_title']
+			return self.pensieve['original_title']
 
 	@property
 	def id(self):
 		"""
 		:rtype: int
 		"""
-		if 'id' in self._pensieve:
-			return self._pensieve['id']
+		if 'id' in self.pensieve:
+			return self.pensieve['id']
 		else:
-			return self._pensieve['original_id']
+			return self.pensieve['original_id']
 
 	@property
 	def url(self):
-		if 'url' not in self._pensieve:
+		if 'url' not in self.pensieve:
 			raise AttributeError(f'Page {self} does not have a url!')
-		elif self._pensieve['url'] is None:
+		elif self.pensieve['url'] is None:
 			raise AttributeError(f'Page {self} does not have a url!')
-		return self._pensieve['url']
+		return self.pensieve['url']
 
-	@property
-	def api(self):
-		"""
-		:rtype: .Wikipedia_class.Wikipedia
-		"""
-		if self._api is None:
-			raise AttributeError('Wikipedia API is missing!')
-		else:
-			return self._api
+
 
 	@property
 	def pensieve(self):
@@ -131,14 +186,14 @@ class Page:
 		"""
 		:rtype: str
 		"""
-		return 'http://' + self.api.language + '.wikipedia.org'
+		return 'http://' + self.wikipedia.language + '.wikipedia.org'
 
-	@api.setter
-	def api(self, api):
+	@wikipedia.setter
+	def wikipedia(self, wikipedia):
 		"""
-		:type api: .Wikipedia_class.Wikipedia
+		:type wikipedia: .Wikipedia_class.Wikipedia
 		"""
-		self._api = api
+		self._wikipedia = wikipedia
 
 	def get_children(self, echo=1):
 		link_lists = self['link_list']
@@ -148,7 +203,7 @@ class Page:
 			non_php_urls = [url for url in wikipedia_urls if '/index.php?' not in url]
 
 			pages = ProgressBar.map(
-				function=lambda x: self.__class__(url=x, redirect=self['redirect'], api=self.api),
+				function=lambda x: self.__class__(url=x, redirect=self['redirect'], wikipedia=self.wikipedia),
 				iterable=non_php_urls, echo=echo, text=self['url']
 			)
 			return pages
@@ -156,7 +211,7 @@ class Page:
 			return []
 
 	def request(self, url=None, parameters=None, format='html'):
-		return self.api.request(url=url, parameters=parameters, format=format)
+		return self.wikipedia.request(url=url, parameters=parameters, format=format)
 
 	def clear(self):
 		new_pensieve = Pensieve(safe=True)
@@ -213,7 +268,7 @@ class Page:
 			else:
 				raise RedirectError(getattr(self, 'title', page['title']))
 
-		# since we only asked for disambiguation in ppprop,
+		# since we only asked for disambiguation in pageprop,
 		# if a pageprop is returned,
 		# then the page must be a disambiguation page
 		elif 'pageprops' in page:
@@ -228,39 +283,21 @@ class Page:
 				'full_url': full_url, 'language': language, 'namespace': namespace, 'disambiguation': False
 			}
 
-	def _parse_search_results(self, keys):
-
-		def create_search_item_function(_key):
-			def get_search_item(x):
-				return x[_key]
-			return get_search_item
-		for key in keys:
-			self._pensieve.store(
-				key, precursors=['search_result'],
-				function=create_search_item_function(_key=key),
-				evaluate=False
-			)
-
-		self._pensieve.store(
-			key='json', precursors=['id', 'title'], evaluate=False,
-			function=lambda x: self._get_json(id=x['id'], title=x['title'])
-		)
-
 	def _get_url_response(self):
-		self._pensieve.store(
-			key='url_response', precursors=['url'], evaluate=False,
+		self.pensieve.store(
+			key='url_response', precursors='url', evaluate=False,
 			function=lambda x: self.request(url=x, format='response')
 		)
 
 	def _load_from_url(self):
 		self._get_url_response()
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='original_id', precursors=['url_response'], evaluate=False,
 			function=lambda x: get_wikipedia_id(x.text)
 		)
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='search_result', precursors=['original_id', 'redirect'], evaluate=False,
 			function=lambda x: self._search_page(
 				title=None, id=x['original_id'], redirect=x['redirect'],
@@ -268,65 +305,72 @@ class Page:
 			)
 		)
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='id', precursors=['url_response'], evaluate=False,
 			function=lambda x: get_wikipedia_id(x.text)
 		)
-		self._pensieve.store(
+		self.pensieve.store(
 			key='title', precursors=['url_response'], evaluate=False,
 			function=lambda x: get_page_title(x.text)
 		)
-		self._pensieve.store(
+		self.pensieve.store(
 			key='language', precursors=['url_response'], evaluate=False,
 			function=lambda x: get_page_language(x.text)
 		)
-		self._pensieve.store(
+		self.pensieve.store(
 			key='namespace', precursors=['url_response'], evaluate=False,
 			function=lambda x: get_page_namespace(x.text)
 		)
-		self._pensieve.store(
+		self.pensieve.store(
 			key='full_url', precursors=['url'], evaluate=False,
 			function=lambda x: x
 		)
-		self._pensieve['disambiguation'] = False
-		self._pensieve['redirected_from'] = None
+		self.pensieve['disambiguation'] = False
+		self.pensieve['redirected_from'] = None
 
 	def _load_from_id(self):
-		self._pensieve.store(
+		self.pensieve.store(
 			key='search_result', precursors=['original_id', 'redirect'], evaluate=False,
 			function=lambda x: self._search_page(
 				title=None, id=x['original_id'], redirect=x['redirect'],
 				redirected_from=None
 			)
 		)
-		self._parse_search_results(
-			keys=['id', 'title', 'page', 'redirected_from', 'language', 'namespace', 'full_url', 'disambiguation']
-		)
-		self._pensieve.store(key='url', precursors=['page'], function=lambda x: x['fullurl'], evaluate=False)
+		self.pensieve.decouple(key='search_result', prefix='')
+
+		try:
+			self.pensieve.store(
+				key='json', precursors=['id', 'title'], evaluate=False,
+				function=lambda x: self._get_json(id=x['id'], title=x['title'])
+			)
+		except Exception as e:
+			display(self.pensieve)
+			raise e
+
+		self.pensieve.store(key='url', precursors=['page'], function=lambda x: x['fullurl'], evaluate=False)
 		self._get_url_response()
 
 	def _load_from_title(self):
-		self._pensieve.store(
+		self.pensieve.store(
 			key='search_result', precursors=['original_title', 'redirect'], evaluate=False,
 			function=lambda x: self._search_page(
 				title=x['original_title'], id=None, redirect=x['redirect'],
 				redirected_from=None
 			)
 		)
-		self._parse_search_results(
-			keys=[
-				'id', 'title', 'page', 'redirected_from', 'language',
-				'namespace', 'full_url', 'disambiguation'
-			]
+		self.pensieve.decouple(key='search_result')
+		self.pensieve.store(
+			key='json', precursors=['id', 'title'], evaluate=False,
+			function=lambda x: self._get_json(id=x['id'], title=x['title'])
 		)
-		self._pensieve.store(
+		self.pensieve.store(
 			key='url', precursors=['page'],
 			function=lambda x: x['fullurl'], evaluate=False
 		)
 		self._get_url_response()
 
 	def _load_the_rest(self):
-		self._pensieve.store(
+		self.pensieve.store(
 			key='base_url', precursors=['url'],
 			evaluate=False, materialize=False,
 			function=lambda x: x[:x.find('/wiki/')]
@@ -335,112 +379,96 @@ class Page:
 		# main parts
 		def _add_see_also_flag(x):
 			x = re.sub(
-				r'<h2>.*>see also<.*</h2>', '<h2>SEEALSO</h2><ul><li><a href="http://SEEALSO" title="SEEALSO">SEEALSO</a></li></ul>',
-				x,
-				flags=re.IGNORECASE
-			)
-			x = re.sub(
-				r'<h2>.*>references<.*</h2>', '<h2>SEEALSO</h2><ul><li><a href="http://SEEALSO" title="SEEALSO">SEEALSO</a></li></ul>',
+				r'<h2>.*>(references|external\s+links|notes\s+and\s+references|see\s+also)<.*</h2>',
+				'<h2>SEEALSO</h2><ul><li><a href="http://SEEALSO" title="SEEALSO">SEEALSO</a></li></ul>',
 				x,
 				flags=re.IGNORECASE
 			)
 			return x
 
-		self._pensieve.store(
-			key='body', precursors=['url_response'], evaluate=False,
-			function=lambda x: BeautifulSoup(
-				_add_see_also_flag(x.text),
-				'lxml'
+		def _get_beautiful_soup(url_response):
+			text = _add_see_also_flag(url_response.text.replace('\\u0026', 'and').replace('&amp;', 'and'))
+			soup = BeautifulSoup(text, 'lxml')
+			for element in soup.find_all(name='div', attrs={'id': 'mw-panel'}):
+				element.decompose()
+			for element in soup.find_all(name='div', attrs={'id': 'mw-head'}):
+				element.decompose()
+			return soup
+
+
+		self.pensieve.store(
+			key='separated_body', precursors=['url_response'], evaluate=False,
+			function=lambda url_response: separate_body_from_navigation_and_info_box(
+				url_response=url_response
 			)
 		)
 
-		self._pensieve.store(
+		self.pensieve.store(
+			key='body',
+			function=lambda separated_body: separated_body['body']
+		)
+
+
+		self.pensieve.store(
 			key='headers', precursors=['body'], evaluate=False,
 			function=lambda x: x.find_all(['h1', 'h2', 'h3'])
 		)
 
-		def _get_header_tokens(headers):
-			tokens = []
-			for header in headers:
-				text = header.text
-				if text == 'SEEALSO':
-					break
-				text = text[:-6] if text.endswith('[edit]') else text
-				tokens += tokenize(text)
-			return tokens
 
-		self._pensieve.store(
-			key='header_tokens', precursors=['headers'], evaluate=False,
-			function=_get_header_tokens
+		self.pensieve.store(
+			key='info_box', evaluate=False,
+			function=lambda separated_body: InfoBox(separated_body['info_box'])
 		)
 
-		self._pensieve.store(
-			key='info_box', precursors=['body'], evaluate=False,
-			function=lambda x: InfoBox(x.find(name='table', attrs={'class': 'infobox'}), extract=True)
+		self.pensieve.store(
+			key='vertical_navigation_box',  evaluate=False,
+			function=lambda separated_body: separated_body['vertical_navigation_box']
 		)
 
-		self._pensieve.store(
-			key='vertical_navigation_box', precursors=['body'], evaluate=False,
-			function=lambda x: get_vertical_navigation_box(x, extract=True)
+		self.pensieve.store(
+			key='navigation_boxes', evaluate=False,
+			function=lambda separated_body: [
+				box for box in separated_body['navigation_boxes']
+			]
 		)
 
-		self._pensieve.store(
-			key='navigation_boxes', precursors=['body'], evaluate=False,
-			function=lambda x: get_navigation_boxes(x, extract=True)
-		)
-
-		self._pensieve.store(
-			key='category_box', precursors=['body'], evaluate=False,
-			function=lambda x: get_category_box(x, extract=True)
+		self.pensieve.store(
+			key='category_box', evaluate=False,
+			function=lambda separated_body: separated_body['category_box']
 		)
 
 		# end of main parts
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='paragraphs', precursors=['body'], evaluate=False,
 			function=lambda x: get_main_paragraphs(body=x)
 		)
 
-		self._pensieve.store(
-			key='paragraph_statistics', precursors=['paragraphs'], evaluate=False,
-			function=lambda x: get_paragraph_statistics(paragraphs=x)
+		self.pensieve.store(
+			key='paragraph_links', precursors=['paragraphs', 'base_url'], evaluate=False,
+			function=lambda x: [
+				[
+					link.url
+					for link in Spoon.find_links(element=paragraph, base_url=x['base_url'])
+					if isinstance(link, Link)
+				]
+				for paragraph in x['paragraphs']
+			]
 		)
 
-		self._pensieve.store(
-			key='token_paragraphs_and_tokens', precursors=['paragraphs'], evaluate=False,
-			function=lambda x: get_tokens_in_paragraphs(paragraphs=x, num_tokens=100)
-		)
-
-		self._pensieve.store(
-			key='token_paragraphs', precursors=['token_paragraphs_and_tokens'], evaluate=False,
-			function=lambda x: x['paragraphs']
-		)
-
-		self._pensieve.store(
-			key='tokens', precursors=['token_paragraphs_and_tokens'], evaluate=False,
-			function=lambda x: x['tokens']
-		)
-
-		self._pensieve.store(
-			key='category_links', precursors=['category_box', 'base_url'], evaluate=False,
-			function=lambda x: Spoon.find_links(element=x['category_box'], base_url=x['base_url'])
-		)
-
-		self._pensieve.store(
-			key='categories', precursors=['category_links'], evaluate=False,
-			function=get_categories
-		)
-
-		self._pensieve.store(
-			key='signature', precursors=['categories', 'info_box', 'tokens', 'header_tokens', 'paragraph_statistics'],
-			evaluate=False,
-			function=lambda x: get_page_signature(
-				tokens=x['tokens'], info_box=x['info_box'], categories=x['categories'],
-				header_tokens=x['header_tokens'], paragraph_statistics=x['paragraph_statistics']
+		self.pensieve.store(
+			key='category_links', evaluate=False,
+			function=lambda category_box, base_url: Spoon.find_links(
+				element=category_box, base_url=base_url
 			)
 		)
 
-		self._pensieve.store(
+		self.pensieve.store(
+			key='categories', evaluate=False,
+			function=get_categories
+		)
+
+		self.pensieve.store(
 			key='disambiguation_results',
 			precursors=['disambiguation', 'body', 'base_url'],
 			evaluate=False,
@@ -449,7 +477,7 @@ class Page:
 			)
 		)
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='tables',
 			precursors=['body', 'base_url'],
 			evaluate=False,
@@ -461,24 +489,24 @@ class Page:
 			]
 		)
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='table_links',
 			precursors=['tables'],
 			evaluate=False,
 			function=find_main_links_in_tables
 		)
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='link_and_anchors', precursors=['body', 'base_url'], evaluate=False,
 			function=lambda x: get_anchors_and_links(soup=x['body'], base_url=x['base_url'])
 		)
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='link_and_anchor_list', precursors=['link_and_anchors'], evaluate=False,
 			function=lambda x: x['list_link_and_anchors']
 		)
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='nested_link_and_anchor_lists', precursors=['body', 'base_url'], evaluate=False,
 			function=lambda x: Spoon.get_lists(element=x['body'], links_only=True, base_url=x['base_url'])
 		)
@@ -503,57 +531,54 @@ class Page:
 				else:
 					return link_lists
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='nested_anchor_lists', precursors=['nested_link_and_anchor_lists'], evaluate=False,
 			function=_remove_nonanchors
 		)
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='anchor_list', precursors=['link_and_anchor_list'], evaluate=False,
 			function=_remove_nonanchors
 		)
 
 
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='nested_link_lists', precursors=['nested_link_and_anchor_lists'], evaluate=False,
 			function=_remove_anchors
 		)
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='link_list', precursors=['link_and_anchor_list'], evaluate=False,
 			function=_remove_anchors
 		)
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='summary', precursors=['id', 'title'], evaluate=False,
 			function=lambda x: get_page_summary(page=self, id=x['id'], title=x['title'])
 		)
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='content', precursors=['id', 'title'], evaluate=False,
 			function=lambda x: self._get_content(id=x['id'], title=x['title'])
 		)
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='extract', precursors=['content'], evaluate=False, materialize=False,
 			function=lambda x: x['extract']
 		)
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='revision_id', precursors=['content'], evaluate=False, materialize=False,
 			function=lambda x: x['revisions'][0]['revid']
 		)
 
-		self._pensieve.store(
+		self.pensieve.store(
 			key='parent_id', precursors=['content'], evaluate=False, materialize=False,
 			function=lambda x: x['revisions'][0]['parentid']
 		)
 
-		self._pensieve.store(
-			key='summary_tokens', precursors=['summary'], evaluate=False, materialize=False,
-			function=tokenize
-		)
+
 
 	def _get_json(self, id, title):
 		id = str(id)
@@ -580,3 +605,6 @@ class Page:
 		:rtype: list[DataFrame]
 		"""
 		return self['tables']
+
+	def __hashkey__(self):
+		return (repr(self.url), repr(self.__class__))

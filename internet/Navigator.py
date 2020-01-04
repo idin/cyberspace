@@ -14,7 +14,7 @@ from json import load as load_json
 
 import time
 import warnings
-from chronology import MeasurementSet
+from chronometry import MeasurementSet
 
 
 class Navigator:

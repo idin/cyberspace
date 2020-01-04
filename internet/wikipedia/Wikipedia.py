@@ -4,17 +4,14 @@ import requests
 from requests.adapters import SSLError
 import time
 import warnings
-from pandas import DataFrame
-from interaction import iterate
 import re
 
 # i
-from chronology import MeasurementSet, get_elapsed, get_now
+from chronometry import MeasurementSet, get_elapsed, get_now
 from abstract import Graph
 
 from .exceptions import HTTPTimeoutError, WikipediaException
-from .Page_class import Page
-from .wikipedia_lists import WIKIPEDIA_LISTS
+from .Page import Page
 from .get_special_data import get_special_data
 
 
@@ -24,6 +21,7 @@ class Wikipedia:
 			user_agent='wikipedia (https://github.com/goldsmith/Wikipedia/)',
 			rate_limit_wait_seconds=0.01,
 			cache=None,
+			num_request_tries=4
 	):
 		"""
 		:param str language: such as 'en'
@@ -35,6 +33,7 @@ class Wikipedia:
 		self._user_agent = user_agent
 		self._rate_limit_wait = rate_limit_wait_seconds
 		self._rate_limit_last_call = None
+		self._num_request_tries = num_request_tries
 
 		self._cache = cache
 		if self._cache:
@@ -50,6 +49,37 @@ class Wikipedia:
 
 		self._function_durations = MeasurementSet()
 
+	def __hashkey__(self):
+		return (self.__class__.__name__, self._language, self._user_agent, self._rate_limit_wait, self._cache)
+
+	def __getstate__(self):
+		return {
+			'language': self._language,
+			'user_agent': self._user_agent,
+			'rate_limit_wait': self._rate_limit_wait,
+			'rate_limit_last_call': self._rate_limit_last_call,
+			'cache': self._cache,
+			'function_durations': self._function_durations
+		}
+
+	def __setstate__(self, state):
+		self._language = state['language']
+		self._user_agent = state['user_agent']
+		self._rate_limit_wait = state['rate_limit_wait']
+		self._rate_limit_last_call = state['rate_limit_last_call']
+		self._cache = state['cache']
+		self._function_durations = state['function_durations']
+		if self._cache:
+			self.request = self._cache.make_cached(
+				id='wikipedia_request_function',
+				function=self._request,
+				condition_function=self._request_result_valid,
+				sub_directory='request'
+			)
+
+		else:
+			self.request = self._request
+
 	def __eq__(self, other):
 		"""
 		:type other: Wikipedia
@@ -60,7 +90,12 @@ class Wikipedia:
 		else:
 			return False
 
-
+	@property
+	def cache(self):
+		"""
+		:rtype: disk.Cache or NoneType
+		"""
+		return self._cache
 
 	@property
 	def function_durations(self):
@@ -77,41 +112,54 @@ class Wikipedia:
 	def api_url(self):
 		return 'http://' + self.language + '.wikipedia.org/w/api.php'
 
-	def _request_result_valid(self, result, parameters=None, url=None, format='json'):
-		return True
+	@staticmethod
+	def _request_result_valid(result, **kwargs):
+		return result is not None
 
 	def _request(self, parameters=None, url=None, format='json'):
 		"""
 		:type parameters: dict
 		:rtype: dict
 		"""
-		if format == 'json':
-			if parameters is None:
-				raise ValueError('parameters cannot be empty for json request!')
-			parameters['format'] = 'json'
-			if 'action' not in parameters:
-				parameters['action'] = 'query'
-		else:
-			if url is None:
-				raise ValueError('url cannot be empty for non-json request!')
+		_format = format
+		for i in range(1, self._num_request_tries + 1):
 
-		headers = {'User-Agent': self._user_agent}
-
-		if self._rate_limit_wait and self._rate_limit_last_call:
-			wait_time = self._rate_limit_wait - get_elapsed(start=self._rate_limit_last_call, unit='s')
-			if wait_time > 0:
-				time.sleep(wait_time)
-
-		if format == 'json':
 			try:
-				r = requests.get(self.api_url, params=parameters, headers=headers)
-				result = r.json()
+				if _format == 'json':
+					if parameters is None:
+						raise ValueError('parameters cannot be empty for json request!')
+					parameters['format'] = 'json'
+					if 'action' not in parameters:
+						parameters['action'] = 'query'
+				else:
+					if url is None:
+						raise ValueError('url cannot be empty for non-json request!')
+
+				headers = {'User-Agent': self._user_agent}
+
+				if self._rate_limit_wait and self._rate_limit_last_call:
+					wait_time = self._rate_limit_wait - get_elapsed(start=self._rate_limit_last_call, unit='s')
+					if wait_time > 0:
+						time.sleep(wait_time)
+
+				if _format == 'json':
+					r = requests.get(self.api_url, params=parameters, headers=headers)
+					result = r.json()
+
+				else:
+					result = requests.get(url, headers=headers)
+
+				break
+
 			except SSLError as e:
+				print(f'try {i}, error with get request with url="{url}", headers="{headers}", format="{_format}"')
 				warnings.warn(str(e))
-				result = None
+				time.sleep(0.001 * 10 ** i)
+
 
 		else:
-			result = requests.get(url, headers=headers)
+			raise e
+
 			# result = html.document_fromstring(r.text)
 			# result = r.text
 
@@ -126,16 +174,7 @@ class Wikipedia:
 		:type title: str or NoneType
 		:rtype: Page
 		"""
-		return Page(id=id, url=url, title=title, namespace=namespace, api=self, redirect=redirect)
-
-	'''
-	def _get_title_and_id(self, url, redirect):
-		try:
-			_page = self.get_page(url=url, redirect=redirect)
-			return {'id': _page['id'], 'title': _page['title'], 'url': _page['url']}
-		except Exception as e:
-			return None
-	'''
+		return Page(id=id, url=url, title=title, namespace=namespace, wikipedia=self, redirect=redirect)
 
 	def get_page_graph(
 			self, graph=None, id=None, url=None, title=None, namespace=0, redirect=True,
@@ -200,21 +239,26 @@ class Wikipedia:
 				raise WikipediaException(raw_results['error']['info'])
 
 		results = raw_results['query']['search']
-		pages = [
-			Page(api=self, id=d['pageid'], title=d['title'], namespace=d['ns'], redirect=redirect) for d in results
-		]
+		try:
+			pages = [
+				Page(wikipedia=self, id=d['pageid'], title=d['title'], namespace=d['ns'], redirect=redirect) for d in results
+			]
+		except Exception as e:
+			print('\n'*5, 'error in:\n', results, '\n'*5)
+			raise e
+
 		already_captured_urls = [page['url'] for page in pages]
 		disambiguation_pages = [page for page in pages if page['disambiguation']]
 		disambiguation_results = []
 		total_num_results = len(pages)
 		for disambiguation_page in disambiguation_pages:
-			for url_dictionary in disambiguation_page['disambiguation_results']:
-				if url_dictionary['url'] not in already_captured_urls and total_num_results<num_results:
+			for link in disambiguation_page['disambiguation_results']:
+				if link.url not in already_captured_urls and total_num_results<num_results:
 					wikipedia_url_regex_str = '^(http|https)://.+\.wikipedia.org'
 					wikipedia_url_regex = re.compile(wikipedia_url_regex_str)
-					if re.match(wikipedia_url_regex, url_dictionary['url']):
+					if re.match(wikipedia_url_regex, link['url']):
 						page = Page(
-							api=self, url=url_dictionary['url'], title=url_dictionary['text'],
+							wikipedia=self, url=link.url, title=link.text,
 							disambiguation_url=disambiguation_page['url']
 						)
 						disambiguation_results.append(page)
@@ -224,50 +268,7 @@ class Wikipedia:
 	def get_performance(self):
 		return self.function_durations.summary_data
 
-	def get_wikipedia_lists(self):
-		lists = {
-			'brand': WIKIPEDIA_LISTS['brands'],
-			'company':WIKIPEDIA_LISTS['companies'],
-			'person': WIKIPEDIA_LISTS['americans']
-		}
-		extra_title = 'list of '
-
-		categories = []
-		subcategories = []
-		titles = []
-		list_page_urls = []
-		urls = []
-		for category, l in lists.items():
-			for list_page_url in iterate(l, text=category):
-				page = self.get_page(url=list_page_url)
-				subcategory = page['title']
-
-				if subcategory is not None:
-					subcategory = subcategory.replace('\\u0026', '&')
-					if extra_title.lower() in subcategory.lower():
-						subcategory = subcategory[len(extra_title):]
-				link_list = page['link_list']
-				if link_list is not None:
-					for link in link_list:
-						if link['url'] is not None:
-							if 'text' in link:
-								title = link['text']
-							else:
-								title = None
-							titles.append(title)
-							urls.append(link['url'])
-
-							categories.append(category)
-							subcategories.append(subcategory)
-							list_page_urls.append(list_page_url)
-
-		result = DataFrame({
-			'category': categories,
-			'subcategory': subcategories,
-			'list_page_url': list_page_urls,
-			'title': titles,
-			'url': urls})
-		return result
-
 	def get_data(self, name, echo=1):
 		return get_special_data(wikipedia=self, name=name, echo=echo)
+
+WIKIPEDIA = Wikipedia()
