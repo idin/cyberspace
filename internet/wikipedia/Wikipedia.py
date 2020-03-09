@@ -11,7 +11,7 @@ from chronometry import MeasurementSet, get_elapsed, get_now
 from abstract import Graph
 
 from .exceptions import HTTPTimeoutError, WikipediaException
-from .Page import Page
+from .WikipediaPage import WikipediaPage
 from .get_special_data import get_special_data
 
 
@@ -172,9 +172,9 @@ class Wikipedia:
 		:type id: int or str or NoneType
 		:type url: str or NoneType
 		:type title: str or NoneType
-		:rtype: Page
+		:rtype: WikipediaPage
 		"""
-		return Page(id=id, url=url, title=title, namespace=namespace, wikipedia=self, redirect=redirect)
+		return WikipediaPage(id=id, url=url, title=title, namespace=namespace, wikipedia=self, redirect=redirect)
 
 	def get_page_graph(
 			self, graph=None, id=None, url=None, title=None, namespace=0, redirect=True,
@@ -241,7 +241,7 @@ class Wikipedia:
 		results = raw_results['query']['search']
 		try:
 			pages = [
-				Page(wikipedia=self, id=d['pageid'], title=d['title'], namespace=d['ns'], redirect=redirect) for d in results
+				WikipediaPage(wikipedia=self, id=d['pageid'], title=d['title'], namespace=d['ns'], redirect=redirect) for d in results
 			]
 		except Exception as e:
 			print('\n'*5, 'error in:\n', results, '\n'*5)
@@ -257,7 +257,7 @@ class Wikipedia:
 					wikipedia_url_regex_str = '^(http|https)://.+\.wikipedia.org'
 					wikipedia_url_regex = re.compile(wikipedia_url_regex_str)
 					if re.match(wikipedia_url_regex, link['url']):
-						page = Page(
+						page = WikipediaPage(
 							wikipedia=self, url=link.url, title=link.text,
 							disambiguation_url=disambiguation_page['url']
 						)

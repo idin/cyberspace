@@ -1,6 +1,21 @@
 import json
 from silverware import separate_row_header, parse_link
-from linguistics import tokenize
+
+
+import re
+
+WORD = re.compile(r'\w+')
+
+
+def tokenize(text):
+	"""
+	this function tokenizes text at a very high speed
+	:param str text: text to be tokenized
+	:rtype: list[str]
+	"""
+	words = WORD.findall(text)
+	return words
+
 
 class InfoBox:
 	def __init__(self, html, extract=False):

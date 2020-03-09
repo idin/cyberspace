@@ -1,8 +1,5 @@
 from silverware import Spoon, Link, parse_link, find
-
 from bs4 import BeautifulSoup, Tag
-
-from linguistics import tokenize
 
 
 def get_search_parameters(id, title):

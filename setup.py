@@ -8,7 +8,7 @@ def readme():
 
 setup(
 	name='internet',
-	version='2019.12.29.4',
+	version='2020.3.3.6',
 	license='MIT',
 
 	url='https://github.com/idin/internet',
@@ -30,8 +30,8 @@ setup(
 
 	packages=find_packages(exclude=["jupyter_tests", ".idea", ".git"]),
 	install_requires=[
-		'requests', 'bs4', 'selenium', 'chronometry',
-		'slytherin', 'abstract', 'pensieve', 'linguistics', 'pandas', 'ravenclaw', 'silverware'
+		'requests', 'bs4', 'chronometry', 'requests_ntlm', #'selenium', 'linguistics',
+		'slytherin', 'abstract', 'pensieve', 'pandas', 'ravenclaw', 'silverware'
 	],
 	python_requires='~=3.6',
 	zip_safe=False
