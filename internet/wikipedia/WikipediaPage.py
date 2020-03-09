@@ -18,7 +18,7 @@ from pandas import DataFrame
 import warnings
 
 
-class Page:
+class WikipediaPage:
 	def __init__(
 			self, wikipedia, id=None, url=None, title=None, namespace=None, redirect=True, disambiguation_url=None,
 			ignore_error=False
@@ -120,7 +120,7 @@ class Page:
 
 	def __eq__(self, other):
 		"""
-		:type other: Page
+		:type other: WikipediaPage
 		:rtype: bool
 		"""
 		if isinstance(other, self.__class__):
