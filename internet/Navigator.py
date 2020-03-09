@@ -1,3 +1,4 @@
+"""
 from selenium.webdriver.chrome.webdriver import WebDriver as ChromeDriver
 from selenium.webdriver.firefox.webdriver import WebDriver as FirefoxDriver
 from selenium.common.exceptions import TimeoutException
@@ -5,12 +6,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.common.by import By
 from selenium.webdriver import Chrome, Firefox
-#import urllib.request
+"""
 import requests
 from requests.adapters import SSLError
 from bs4 import BeautifulSoup
-
-from json import load as load_json
 
 import time
 import warnings
@@ -23,17 +22,20 @@ class Navigator:
 		:type driver: str or ChromeDriver or FirefoxDriver or NoneType
 		:param str user_agent: the default user agent, one of random, ie, ff, chrome, etc.
 		"""
+
+		'''
 		if isinstance(driver, str):
 			if driver.lower() == 'chrome':
-				self._driver = Chrome()
+				driver = Chrome()
 			elif driver.lower() == 'firefox':
-				self._driver = Firefox()
+				driver = Firefox()
 			else:
 				raise ValueError(f'Unknown driver: "{driver}"')
 		else:
 			if driver is None and request_method != 'urllib':
 				raise ValueError(f'Driverless Navigator only works with urllib method, not with "{request_method}"!')
-			self._driver = driver
+		'''
+		self._driver = driver
 
 		try:
 			self._user_agent = user_agent.random
