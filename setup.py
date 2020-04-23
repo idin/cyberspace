@@ -8,7 +8,7 @@ def readme():
 
 setup(
 	name='internet',
-	version='2020.3.3.6',
+	version='2020.4.6',
 	license='MIT',
 
 	url='https://github.com/idin/internet',
