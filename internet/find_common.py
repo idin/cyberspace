@@ -4,7 +4,6 @@ def find_common_left(strings):
 	:rtype: str
 	"""
 	length = min([len(s) for s in strings])
-	i = 0
 	result = ''
 	for i in range(length):
 		if all([strings[0][i] == s[i] for s in strings[1:]]):
@@ -15,13 +14,14 @@ def find_common_left(strings):
 
 
 def find_common_right(strings):
-	reversed = [s[::-1] for s in strings]
-	return find_common_left(reversed)[::-1]
+	reversed_string = [s[::-1] for s in strings]
+	return find_common_left(reversed_string)[::-1]
 
 
 def find_common(strings, side='left'):
 	"""
 	:param list[str] strings: list of strings we want to find a common left part in
+	:type side: str
 	:rtype: str
 	"""
 	if side[0].lower() == 'l':

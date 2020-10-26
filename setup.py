@@ -30,8 +30,9 @@ setup(
 
 	packages=find_packages(exclude=["jupyter_tests", ".idea", ".git"]),
 	install_requires=[
-		'requests', 'bs4', 'chronometry', 'requests_ntlm', #'selenium', 'linguistics',
-		'slytherin', 'abstract', 'pensieve', 'pandas', 'ravenclaw', 'silverware'
+		'IMDbPy', 'bs4', 'requests_ntlm',
+		'pandas', 'requests',
+		'chronometry', 'slytherin', 'abstract', 'pensieve', 'ravenclaw', 'silverware'
 	],
 	python_requires='~=3.6',
 	zip_safe=False

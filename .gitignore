@@ -2,3 +2,4 @@ build
 internet.egg-info
 dist
 *.lucy
+*.lucy
