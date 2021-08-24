@@ -7,15 +7,15 @@ def readme():
 
 
 setup(
-	name='internet',
+	name='cyberspace',
 	version='2020.4.6',
 	license='MIT',
 
-	url='https://github.com/idin/internet',
+	url='https://github.com/idin/cyberspace',
 	author='Idin',
 	author_email='py@idin.ca',
 
-	description='Python library for navigating the internet',
+	description='Python library for navigating the world wide web',
 	long_description=readme(),
 	long_description_content_type='text/markdown',
 

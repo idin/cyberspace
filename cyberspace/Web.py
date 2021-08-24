@@ -6,7 +6,7 @@ from chronometry import get_now, get_elapsed
 import warnings
 
 
-class Internet:
+class Web:
 	def __init__(
 			self, id=0, cache=None, expire_in=None, num_request_tries=4, rate_limit_wait_seconds=0.001,
 			headers=None, parameters=None

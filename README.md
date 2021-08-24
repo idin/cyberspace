@@ -1,11 +1,11 @@
-# Internet
+# CyberSpace
 
 ## Wikipedia
 
 ### InfoBox
 
 ```python
-from internet import Wikipedia
+from cyberspace import Wikipedia
 w = Wikipedia(rate_limit_wait_seconds=0.1)
 result = w.search('steve wozniak')[0]
 print(result)

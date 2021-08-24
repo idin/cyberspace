@@ -3,3 +3,4 @@ internet.egg-info
 dist
 *.lucy
 *.lucy
+.idea
