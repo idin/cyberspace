@@ -8,7 +8,7 @@ def readme():
 
 setup(
 	name='cyberspace',
-	version='2020.4.6',
+	version='2022.1.25',
 	license='MIT',
 
 	url='https://github.com/idin/cyberspace',

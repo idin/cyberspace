@@ -4,3 +4,5 @@ dist
 *.lucy
 *.lucy
 .idea
+cyberspace.egg-info
+.ipynb_checkpoints
