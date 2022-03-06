@@ -1,6 +1,6 @@
 from pensieve import Pensieve
 from chronometry.progress import ProgressBar
-from silverware import Link
+from soupspoon import Link
 
 
 def get_special_data(wikipedia, name, echo=1):

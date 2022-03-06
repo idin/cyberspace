@@ -1,7 +1,7 @@
 from .. import Scraper
 from ravenclaw import standardize_columns
 from pandas import DataFrame
-from silverware import read_table
+from soupspoon import read_table
 
 
 class Country:

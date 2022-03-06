@@ -1,4 +1,7 @@
-from silverware import Spoon, Link, parse_link, find
+import functools
+import operator
+
+from soupspoon import Spoon, Link, parse_link, find
 from bs4 import BeautifulSoup, Tag
 
 

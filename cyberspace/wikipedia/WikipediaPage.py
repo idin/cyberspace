@@ -9,25 +9,28 @@ from .is_wikipedia_page_url import convert_mobile_wikipedia_page_url_to_normal_p
 import re
 from pensieve import Pensieve
 from slytherin.collections import remove_list_duplicates, flatten
+from collections import Counter
 from ravenclaw.wrangling import standardize_columns
 from chronometry.progress import ProgressBar
 
-from silverware import Spoon
+from soupspoon import Spoon, Link, find_links
 from bs4 import BeautifulSoup
 from pandas import DataFrame
 import warnings
+from multiprocessing.pool import ThreadPool
 
 
 class WikipediaPage:
 	def __init__(
 			self, wikipedia, id=None, url=None, title=None, namespace=None, redirect=True, disambiguation_url=None,
-			ignore_error=False
+			ignore_error=False, n_jobs=1
 	):
 		self._wikipedia = wikipedia
 		self._id = id
 		self._url = url
 		self._title = title
 		self._ignore_error = ignore_error
+		self._n_jobs = n_jobs
 		self._setup_pensieve()
 		self.pensieve['namespace'] = namespace
 		self.pensieve['redirect'] = redirect

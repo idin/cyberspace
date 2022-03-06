@@ -8,7 +8,7 @@ def readme():
 
 setup(
 	name='cyberspace',
-	version='2022.1.25',
+	version='2022.2.12',
 	license='MIT',
 
 	url='https://github.com/idin/cyberspace',
@@ -31,8 +31,8 @@ setup(
 	packages=find_packages(exclude=["jupyter_tests", ".idea", ".git"]),
 	install_requires=[
 		'IMDbPy', 'bs4', 'requests_ntlm',
-		'pandas', 'requests',
-		'chronometry', 'slytherin', 'abstract', 'pensieve', 'ravenclaw', 'silverware'
+		'pandas', 'requests', 'memoria', 'disk',
+		'chronometry', 'slytherin', 'abstract', 'pensieve', 'ravenclaw', 'soupspoon'
 	],
 	python_requires='~=3.6',
 	zip_safe=False

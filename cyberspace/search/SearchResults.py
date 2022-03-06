@@ -1,4 +1,4 @@
-from silverware import find_links
+from soupspoon import find_links
 from ..wikipedia import is_wikipedia_page_url
 from .is_yahoo_finance_search_url_function import is_yahoo_finance_search_url
 

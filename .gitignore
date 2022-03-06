@@ -6,3 +6,6 @@ dist
 .idea
 cyberspace.egg-info
 .ipynb_checkpoints
+cyberspace/__pycache__
+cyberspace/wikipedia/__pycache__
+cyberspace/imdb/__pycache__
