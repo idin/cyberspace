@@ -5,6 +5,7 @@ from requests.adapters import SSLError
 import time
 import warnings
 import re
+from disk import Cache, HardFolder
 
 # i
 from chronometry import MeasurementSet, get_elapsed, get_now
@@ -12,6 +13,7 @@ from abstract import Graph
 
 from .exceptions import HTTPTimeoutError, WikipediaException
 from .WikipediaPage import WikipediaPage
+from .WikipediaMemory import WikipediaMemory
 from .get_special_data import get_special_data
 
 
@@ -34,6 +36,10 @@ class Wikipedia:
 		self._rate_limit_wait = rate_limit_wait_seconds
 		self._rate_limit_last_call = None
 		self._num_request_tries = num_request_tries
+
+		self._has_memory = False
+		# if self.has_memory():
+		# 	self._memory = WikipediaMemory(path=self._pickle_path)
 
 		self._cache = cache
 		if self._cache:
@@ -91,6 +97,13 @@ class Wikipedia:
 			return False
 
 	@property
+	def memory(self):
+		"""
+		:rtype: WikipediaMemory
+		"""
+		return self._memory
+
+	@property
 	def cache(self):
 		"""
 		:rtype: disk.Cache or NoneType
@@ -121,6 +134,14 @@ class Wikipedia:
 		:type parameters: dict
 		:rtype: dict
 		"""
+		memory_key = (parameters, url, format)
+
+		if self.has_memory():
+			results = self.memory.get_request_result(key=memory_key)
+			if results:
+				print('getting request from memory!')
+				return results
+
 		_format = format
 		for i in range(1, self._num_request_tries + 1):
 
@@ -165,16 +186,41 @@ class Wikipedia:
 
 		if self._rate_limit_wait:
 			self._rate_limit_last_call = get_now()
+
+		if self.has_memory():
+			self.memory.set_request_result(key=memory_key, results=result)
 		return result
 
-	def get_page(self, url=None, id=None, title=None, namespace=0, redirect=True):
+	def has_memory(self):
+		return self._has_memory
+
+	def save_memory(self):
+		if self.has_memory():
+			self.memory.save_to_file()
+
+	def get_page(self, url=None, id=None, title=None, namespace=0, redirect=True, n_jobs=1):
 		"""
 		:type id: int or str or NoneType
 		:type url: str or NoneType
 		:type title: str or NoneType
 		:rtype: WikipediaPage
 		"""
-		return WikipediaPage(id=id, url=url, title=title, namespace=namespace, wikipedia=self, redirect=redirect)
+		key = (url, id, title, namespace, redirect)
+
+		if self.has_memory():
+			page = self.memory.get_page(key=key)
+			if page :
+				return page
+
+		page = WikipediaPage(
+			id=id, url=url, title=title, namespace=namespace, wikipedia=self, redirect=redirect,
+			n_jobs=n_jobs
+		)
+
+		if self.has_memory():
+			self.memory.set_page(key=key, page=page)
+
+		return page
 
 	def get_page_graph(
 			self, graph=None, id=None, url=None, title=None, namespace=0, redirect=True,
@@ -270,5 +316,6 @@ class Wikipedia:
 
 	def get_data(self, name, echo=1):
 		return get_special_data(wikipedia=self, name=name, echo=echo)
+
 
 WIKIPEDIA = Wikipedia()

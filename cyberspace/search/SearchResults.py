@@ -15,7 +15,7 @@ class SearchResults:
 	def _get_results(self):
 		self._pensieve.store(
 			key='response', precursors=['search_url'], function=lambda x: self.api.request(x),
-			materialize=False, evaluate=False
+			lazy=True, evaluate=False
 		)
 		self._pensieve.store(
 			key='html', precursors=['response'], function=lambda x: x.text,

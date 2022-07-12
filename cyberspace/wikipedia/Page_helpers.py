@@ -125,14 +125,14 @@ def separate_body_from_navigation_and_info_box(url_response):
 	return result
 
 
-def get_categories(category_links):
+def old_get_categories(category_links):
 	if isinstance(category_links, list):
 		urls = [link.url for link in category_links if isinstance(link, Link)]
 		category_sign = '/wiki/Category:'
 		category_urls = [url for url in urls if category_sign in url]
-		return [url[url.find(category_sign) + len(category_sign):] for url in category_urls]
+		return set([url[url.find(category_sign) + len(category_sign):] for url in category_urls])
 	else:
-		return []
+		return set()
 
 
 def is_good_link(_link):
@@ -206,25 +206,18 @@ def get_anchors_and_links(soup, base_url):
 		if i not in table_links
 	}
 	return {
-		'list_link_and_anchors': list(links_in_lists.values()),
+		'list_links_and_anchors': list(links_in_lists.values()),
 		'table_links_and_anchors': list(table_links.values())
 	}
 
 
 def find_main_links_in_tables(tables):
-	result = {}
-	for table in tables:
-		for col in table.columns:
-			links = [x for x in table[col] if isinstance(x, Link)]
-			link_lists = [
-				maybe_link for lists in [x for x in table[col] if isinstance(x, list)]
-				for maybe_link in lists if isinstance(maybe_link, Link)
-			]
-			links = links + link_lists
-			if len(links) > 0:
-				result[str(col)] = links
+	list_of_lists = [
+		table.to_dict('records') for table in tables
+	]
 
-	return result
+	# flatten
+	return functools.reduce(operator.iconcat, list_of_lists, [])
 
 
 def get_main_paragraphs(body):

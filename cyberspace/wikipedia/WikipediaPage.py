@@ -46,6 +46,13 @@ class WikipediaPage:
 
 	_STATE_ATTRIBUTES_ = ['_id', '_url', '_title', '_ignore_error']
 
+	@property
+	def pensieve(self):
+		"""
+		:rtype: Pensieve
+		"""
+		return self._pensieve
+
 	def __getstate__(self):
 		state = {key: getattr(self, key) for key in self._STATE_ATTRIBUTES_}
 		state['_pensieve'] = self._pensieve.get_contents()
@@ -63,12 +70,10 @@ class WikipediaPage:
 			if not self._ignore_error:
 				raise e
 
-	def __hashkey__(self):
-		return (self.__class__.__name__, tuple(getattr(self, name) for name in self._STATE_ATTRIBUTES_))
-
 	def _setup_pensieve(self):
 		self._pensieve = Pensieve(
-			safe=False, function_durations=self.wikipedia.function_durations, warn_unsafe=False, hide_ignored=False
+			lazy=True, materialize=True,
+			function_durations=self.wikipedia.function_durations, hide_ignored=False
 		)
 
 	def _load_primary(self):
@@ -114,7 +119,7 @@ class WikipediaPage:
 	@property
 	def wikipedia(self):
 		"""
-		:rtype: .Wikipedia_class.Wikipedia
+		:rtype: cyberspace.Wikipedia
 		"""
 		if self._wikipedia is None:
 			raise AttributeError('Wikipedia API is missing!')
@@ -142,7 +147,17 @@ class WikipediaPage:
 		return str(self)
 
 	def __getitem__(self, item):
-		return self.pensieve[item]
+		if self.wikipedia.has_memory() and item != 'url':
+			value = self.wikipedia.memory.get_page_attribute(url=self.url, attribute=item)
+			if value is not None and value != False:
+				return value
+
+		value = self.pensieve[item]
+
+		if self.wikipedia.has_memory() and item != 'url':
+			self.wikipedia.memory.set_page_attribute(url=self.url, attribute=item, value=value)
+
+		return value
 
 	def __graph__(self):
 		return self.pensieve.__graph__()
@@ -163,9 +178,9 @@ class WikipediaPage:
 		:rtype: int
 		"""
 		if 'id' in self.pensieve:
-			return self.pensieve['id']
+			return self['id']
 		else:
-			return self.pensieve['original_id']
+			return self['original_id']
 
 	@property
 	def url(self):
@@ -174,15 +189,6 @@ class WikipediaPage:
 		elif self.pensieve['url'] is None:
 			raise AttributeError(f'Page {self} does not have a url!')
 		return self.pensieve['url']
-
-
-
-	@property
-	def pensieve(self):
-		"""
-		:rtype: Pensieve
-		"""
-		return self._pensieve
 
 	@property
 	def base_url(self):
@@ -225,7 +231,6 @@ class WikipediaPage:
 	def _search_page(self, id, title, redirect, redirected_from, num_recursions=0):
 		if num_recursions > 3:
 			raise RecursionError()
-		# print(dict(title=title, id=id, redirect=redirect, redirected_from=redirected_from, num_recursions=num_recursions))
 
 		search_query_parameters = get_search_parameters(id=id, title=title)
 		search_request = self.request(parameters=search_query_parameters, format='json')
@@ -373,215 +378,177 @@ class WikipediaPage:
 		self._get_url_response()
 
 	def _load_the_rest(self):
-		self.pensieve.store(
-			key='base_url', precursors=['url'],
-			evaluate=False, materialize=False,
-			function=lambda x: x[:x.find('/wiki/')]
+		self.pensieve['base_url'] = lambda url: url[:url.find('/wiki/')]
+
+		self.pensieve['separated_body'] = lambda url_response: separate_body_from_navigation_and_info_box(
+			url_response=url_response
 		)
 
-		# main parts
-		def _add_see_also_flag(x):
-			x = re.sub(
-				r'<h2>.*>(references|external\s+links|notes\s+and\s+references|see\s+also)<.*</h2>',
-				'<h2>SEEALSO</h2><ul><li><a href="http://SEEALSO" title="SEEALSO">SEEALSO</a></li></ul>',
-				x,
-				flags=re.IGNORECASE
-			)
-			return x
+		self.pensieve['body'] = lambda separated_body: separated_body['body']
 
-		def _get_beautiful_soup(url_response):
-			text = _add_see_also_flag(url_response.text.replace('\\u0026', 'and').replace('&amp;', 'and'))
-			soup = BeautifulSoup(text, 'lxml')
-			for element in soup.find_all(name='div', attrs={'id': 'mw-panel'}):
-				element.decompose()
-			for element in soup.find_all(name='div', attrs={'id': 'mw-head'}):
-				element.decompose()
-			return soup
+		self.pensieve['headers'] = lambda body: body.find_all(['h1', 'h2', 'h3'])
 
-
-		self.pensieve.store(
-			key='separated_body', precursors=['url_response'], evaluate=False,
-			function=lambda url_response: separate_body_from_navigation_and_info_box(
-				url_response=url_response
-			)
+		self.pensieve['info_box'] = lambda separated_body, base_url: InfoBox(
+			separated_body['info_box'], base_url=base_url
 		)
 
-		self.pensieve.store(
-			key='body',
-			function=lambda separated_body: separated_body['body']
-		)
+		self.pensieve['info_box_links'] = lambda info_box: [] if info_box is None else info_box.links
 
+		self.pensieve['info_box_dictionary'] = lambda info_box: info_box._dictionary.copy()
 
-		self.pensieve.store(
-			key='headers', precursors=['body'], evaluate=False,
-			function=lambda x: x.find_all(['h1', 'h2', 'h3'])
-		)
+		self.pensieve['vertical_navigation_box'] = lambda separated_body: separated_body['vertical_navigation_box']
 
+		self.pensieve['navigation_boxes'] = lambda separated_body: [box for box in separated_body['navigation_boxes']]
 
-		self.pensieve.store(
-			key='info_box', evaluate=False,
-			function=lambda separated_body: InfoBox(separated_body['info_box'])
-		)
+		self.pensieve['category_box'] = lambda separated_body: separated_body['category_box']
 
-		self.pensieve.store(
-			key='vertical_navigation_box',  evaluate=False,
-			function=lambda separated_body: separated_body['vertical_navigation_box']
-		)
+		self.pensieve['body_links'] = lambda body, base_url: find_links(body, base=base_url)
 
-		self.pensieve.store(
-			key='navigation_boxes', evaluate=False,
-			function=lambda separated_body: [
-				box for box in separated_body['navigation_boxes']
+		def _group_links(body_links):
+			"""
+			:type body_links: list[Link]
+			"""
+			def __is_good_link(link):
+				"""
+				:type link: Link
+				"""
+				if link.url.startswith('http'):
+					for string in ['#', 'index.php', 'redlink=1', 'edit']:
+						if string in link.url:
+							return False
+					else:
+						return True
+				else:
+					return False
+
+			groups = []
+			for link in body_links:
+				if __is_good_link(link) and is_wikipedia_page_url(link.url):
+					subpage = self.wikipedia.get_page(url=link.url)
+					if len(groups) == 0:
+						groups.append(
+							{'categories': subpage.categories.copy(), 'links': {link}}
+						)
+					else:
+
+						best_group = None
+						for group in groups:
+							# if the subpage has any common category with this category
+							common_categories = group['categories'].intersection(subpage.categories)
+							n_common = len(common_categories)
+							if best_group is None:
+								if n_common > 0:
+									group['categories'] = group['categories'].union(subpage.categories)
+									group['links'].add(link)
+									best_group = (group, n_common)
+							elif n_common > best_group[1]:
+								group['categories'] = group['categories'].union(subpage.categories)
+								group['links'].add(link)
+								best_group = (group, n_common)
+						if best_group is None:
+							groups.append({'categories': subpage.categories.copy(), 'links': {link}})
+			return groups
+
+		self.pensieve['body_links_grouped'] = _group_links
+
+		self.pensieve['paragraphs'] = lambda body: get_main_paragraphs(body=body)
+
+		self.pensieve['paragraph_links'] = lambda paragraphs, base_url: [
+			[
+				link.url for link in Spoon.find_links(element=paragraph, base_url=base_url) if isinstance(link, Link)
 			]
-		)
+			for paragraph in paragraphs
+		]
 
-		self.pensieve.store(
-			key='category_box', evaluate=False,
-			function=lambda separated_body: separated_body['category_box']
-		)
-
-		# end of main parts
-
-		self.pensieve.store(
-			key='paragraphs', precursors=['body'], evaluate=False,
-			function=lambda x: get_main_paragraphs(body=x)
-		)
-
-		self.pensieve.store(
-			key='paragraph_links', precursors=['paragraphs', 'base_url'], evaluate=False,
-			function=lambda x: [
-				[
-					link.url
-					for link in Spoon.find_links(element=paragraph, base_url=x['base_url'])
-					if isinstance(link, Link)
-				]
-				for paragraph in x['paragraphs']
-			]
-		)
-
-		self.pensieve.store(
-			key='category_links', evaluate=False,
-			function=lambda category_box, base_url: Spoon.find_links(
+		def _get_categories(category_box, base_url):
+			category_links = Spoon.find_links(
 				element=category_box, base_url=base_url
 			)
+			def __clean_category_link(link):
+				if link.text.startswith('Category:'):
+					new_text = link.text[len('Category:'):].strip()
+					return Link(url=link.url, text=new_text)
+				else:
+					return link
+
+			if isinstance(category_links, (set, list, tuple)):
+				return {__clean_category_link(link) for link in category_links if isinstance(link, Link)}
+			else:
+				return set()
+
+		self.pensieve['categories'] = _get_categories
+
+		self.pensieve['disambiguation_results'] = lambda disambiguation, body, base_url: get_disambiguation_results(
+			disambiguation=disambiguation, html=body, base_url=base_url
 		)
 
-		self.pensieve.store(
-			key='categories', evaluate=False,
-			function=get_categories
-		)
+		self.pensieve['tables'] = lambda body, base_url: [
+			standardize_columns(data=table)
+			for table in Spoon.filter(
+				soup=body, name='table', attributes={'class': 'wikitable'}
+			).read_tables(base_url=base_url, parse_links=True)
+		]
 
-		self.pensieve.store(
-			key='disambiguation_results',
-			precursors=['disambiguation', 'body', 'base_url'],
-			evaluate=False,
-			function=lambda x: get_disambiguation_results(
-				disambiguation=x['disambiguation'], html=x['body'], base_url=x['base_url']
-			)
-		)
+		self.pensieve['table_links'] = lambda tables: find_main_links_in_tables(tables=tables)
 
-		self.pensieve.store(
-			key='tables',
-			precursors=['body', 'base_url'],
-			evaluate=False,
-			function=lambda x: [
-				standardize_columns(data=table)
-				for table in Spoon.filter(
-					soup=x['body'], name='table', attributes={'class': 'wikitable'}
-				).read_tables(base_url=x['base_url'], parse_links=True)
-			]
-		)
+		self.pensieve['anchors_and_links'] = lambda body, base_url: get_anchors_and_links(soup=body, base_url=base_url)
 
-		self.pensieve.store(
-			key='table_links',
-			precursors=['tables'],
-			evaluate=False,
-			function=find_main_links_in_tables
-		)
+		self.pensieve['link_and_anchor_list'] = lambda anchors_and_links: anchors_and_links['list_links_and_anchors']
 
-		self.pensieve.store(
-			key='link_and_anchors', precursors=['body', 'base_url'], evaluate=False,
-			function=lambda x: get_anchors_and_links(soup=x['body'], base_url=x['base_url'])
-		)
-
-		self.pensieve.store(
-			key='link_and_anchor_list', precursors=['link_and_anchors'], evaluate=False,
-			function=lambda x: x['list_link_and_anchors']
-		)
-
-		self.pensieve.store(
-			key='nested_link_and_anchor_lists', precursors=['body', 'base_url'], evaluate=False,
-			function=lambda x: Spoon.get_lists(element=x['body'], links_only=True, base_url=x['base_url'])
+		self.pensieve['nested_link_and_anchor_lists'] = lambda body, base_url: Spoon.get_lists(
+			element=body, links_only=True, base_url=base_url
 		)
 
 		# 	LINKS IN A PAGE
 		def _remove_anchors(link_lists):
 			if isinstance(link_lists, list):
-				return [_remove_anchors(x) for x in link_lists if x is not None]
+				result = [_remove_anchors(x) for x in link_lists if x is not None]
+				return [x for x in result if x is not None]
 			elif isinstance(link_lists, Link):
 				if link_lists.url.startswith('#'):
 					return None
 				else:
 					return link_lists
+			else:
+				return link_lists
 
-		# 	LINKS IN A PAGE
+		self.pensieve['nested_link_lists'] = lambda nested_link_and_anchor_lists: _remove_anchors(
+			link_lists=nested_link_and_anchor_lists
+		)
+
+		self.pensieve['link_list'] = lambda link_and_anchor_list: _remove_anchors(link_lists=link_and_anchor_list)
+
+		# 	ANCHORS IN A PAGE
 		def _remove_nonanchors(link_lists):
 			if isinstance(link_lists, list):
-				return [_remove_anchors(x) for x in link_lists if x is not None]
+				result = [_remove_nonanchors(x) for x in link_lists if x is not None]
+				return [x for x in result if x is not None]
 			elif isinstance(link_lists, Link):
 				if not link_lists.url.startswith('#'):
 					return None
 				else:
 					return link_lists
+			else:
+				return link_lists
 
-		self.pensieve.store(
-			key='nested_anchor_lists', precursors=['nested_link_and_anchor_lists'], evaluate=False,
-			function=_remove_nonanchors
+		self.pensieve['nested_anchor_lists'] = lambda nested_link_and_anchor_lists: _remove_nonanchors(
+			link_lists=nested_link_and_anchor_lists
 		)
 
-		self.pensieve.store(
-			key='anchor_list', precursors=['link_and_anchor_list'], evaluate=False,
-			function=_remove_nonanchors
-		)
+		self.pensieve['anchor_list'] = lambda link_and_anchor_list: _remove_nonanchors(link_lists=link_and_anchor_list)
 
+		self.pensieve['summary'] = lambda id, title: get_page_summary(page=self, id=id, title=title)
 
+		self.pensieve['content'] = lambda id, title: self._get_content(id=id, title=title)
 
-		self.pensieve.store(
-			key='nested_link_lists', precursors=['nested_link_and_anchor_lists'], evaluate=False,
-			function=_remove_anchors
-		)
+		self.pensieve['extract'] = lambda content: content['extract']
 
-		self.pensieve.store(
-			key='link_list', precursors=['link_and_anchor_list'], evaluate=False,
-			function=_remove_anchors
-		)
+		self.pensieve['revision_id'] = lambda content: content['revisions'][0]['revid']
 
-		self.pensieve.store(
-			key='summary', precursors=['id', 'title'], evaluate=False,
-			function=lambda x: get_page_summary(page=self, id=x['id'], title=x['title'])
-		)
+		self.pensieve['parent_id'] = lambda content: content['revisions'][0]['parentid']
 
-		self.pensieve.store(
-			key='content', precursors=['id', 'title'], evaluate=False,
-			function=lambda x: self._get_content(id=x['id'], title=x['title'])
-		)
-
-		self.pensieve.store(
-			key='extract', precursors=['content'], evaluate=False, materialize=False,
-			function=lambda x: x['extract']
-		)
-
-		self.pensieve.store(
-			key='revision_id', precursors=['content'], evaluate=False, materialize=False,
-			function=lambda x: x['revisions'][0]['revid']
-		)
-
-		self.pensieve.store(
-			key='parent_id', precursors=['content'], evaluate=False, materialize=False,
-			function=lambda x: x['revisions'][0]['parentid']
-		)
-
-
+	def keys(self):
+		return self.pensieve.keys()
 
 	def _get_json(self, id, title):
 		id = str(id)
@@ -609,5 +576,18 @@ class WikipediaPage:
 		"""
 		return self['tables']
 
+	@property
+	def categories(self):
+		"""
+		:rtype: set[str]
+		"""
+		return self['categories']
+
 	def __hashkey__(self):
 		return (repr(self.url), repr(self.__class__))
+
+	def __hash__(self):
+		return hash(self.__hashkey__())
+
+	# def __hashkey__(self):
+	#	return (self.__class__.__name__, tuple(getattr(self, name) for name in self._STATE_ATTRIBUTES_))

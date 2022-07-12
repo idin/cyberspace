@@ -18,38 +18,55 @@ def tokenize(text):
 
 
 class InfoBox:
-	def __init__(self, html, extract=False):
+	def __init__(self, html, extract=False, base_url=None):
 		#strainer = SoupStrainer('table', {'class': re.compile('infobox.+vcard')})
-		if html:
-			for br in html.find_all('br'):
-				br.replace_with('\n')
-			self._dictionary = self._parse_table(html)
-			if extract:
-				html.extract()
-		else:
-			self._dictionary = {}
+		self._html = html
+		self._extract = extract
+		self._base = base_url
+		self._dictionary = None
+		self._links = None
+
+	@property
+	def dictionary(self):
+		if self._dictionary is None:
+			if self._html:
+				for br in self._html.find_all('br'):
+					br.replace_with('\n')
+				self._dictionary = self._parse_table(self._html)
+				if self._extract:
+					self._prepare_links()
+					self._html.extract()
+			else:
+				self._dictionary = {}
+		return self._dictionary
 
 	def __str__(self):
-		return '\n'.join([f'{k}: {v}' for k, v in self._dictionary.items()])
+		return '\n'.join([f'{k}: {v}' for k, v in self.dictionary.items()])
 
 	def __repr__(self):
 		return 'InfoBox:\n'+str(self)
 
 	def __getstate__(self):
-		return self._dictionary
+		return {'html': self._html, 'extract': self._extract, 'dictionary': self._dictionary}
 
 	def __setstate__(self, state):
-		self._dictionary = state
+		for name, value in state.items:
+			setattr(self, f'_{name}', value)
 
 	def __getitem__(self, item):
-		return self._dictionary[item]
+		return self.dictionary[item]
 
 	def __contains__(self, item):
-		return item in self._dictionary
+		return item in self.dictionary
 
 	def copy(self):
 		duplicate = self.__class__(html=None)
-		duplicate._dictionary = self._dictionary.copy()
+		duplicate._extract = self._extract
+		duplicate._html = self._html
+		if self._dictionary is not None:
+			duplicate._dictionary = self._dictionary.copy()
+		else:
+			duplicate._dictionary = None
 		return duplicate
 
 	@staticmethod
@@ -90,3 +107,15 @@ class InfoBox:
 
 	def values(self):
 		return self._dictionary.values()
+
+	def _prepare_links(self):
+		self._links = find_links(elements=self._html, base=self._base, ignore_anchors=True)
+
+	@property
+	def links(self):
+		if self._links is None:
+			self._prepare_links()
+		return self._links
+
+
+
